@@ -18,21 +18,39 @@
 -- Do not regenerate Cutting_ID/Mother_ID by scanning existing rows for a
 -- max value — always go through next_cutting_seq(). See CLAUDE.md.
 
+-- Columns below mix two generations of the real sheet's naming model:
+-- qualifier/collection_code/trade_name/hybrid are the v2 columns from
+-- Skrybix_FIXED_v2.gs, but as of the 2026-07-23 data migration every real
+-- row's naming data actually lives in the OLDER form_code/name_type/
+-- cultivar/natural_cultivar columns instead -- the v2 columns exist on the
+-- live sheet but are unused (blank on all 995 rows). Kept both rather than
+-- guessing which will end up authoritative once the naming-automation UI
+-- gets built (see CLAUDE.md "Not yet built").
 create table if not exists mother_plants (
-  mother_id       text primary key,
-  display_name    text not null,
-  location        text,
-  genus           text not null default 'Hoya',
-  species         text,
-  qualifier       text not null default '' check (qualifier in ('', 'aff.', 'cf.', 'sp.')),
-  collection_code text,
-  cultivar        text,
-  trade_name      text,
-  hybrid          boolean not null default false,
-  botanical_line1 text,
-  botanical_line2 text,
-  print_label     boolean not null default false,
-  created_at      timestamptz not null default now()
+  mother_id        text primary key,
+  display_name     text not null,
+  location         text,
+  genus            text not null default 'Hoya',
+  species          text,
+  qualifier        text not null default '' check (qualifier in ('', 'aff.', 'cf.', 'sp.')),
+  collection_code  text,
+  cultivar         text,
+  trade_name       text,
+  hybrid           boolean not null default false,
+  botanical_line1  text,
+  botanical_line2  text,
+  print_label      boolean not null default false,
+  created_at       timestamptz not null default now(),
+  -- real columns found on the live Mother_Plants tab, not in Skrybix_FIXED_v2.gs
+  form_code        text,
+  name_type        text,
+  natural_cultivar boolean not null default false,
+  spec3            text,
+  mother_seq       text,
+  notes            text,
+  species_key      text,
+  species_key_2    text,
+  flower_photo_link text
 );
 
 -- Persistent, never-reused per-mother cutting sequence counter.

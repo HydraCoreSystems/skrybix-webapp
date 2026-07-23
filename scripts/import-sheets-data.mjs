@@ -77,6 +77,26 @@ function parseCuttingId(cuttingId) {
   return { motherId: m[1], seq: parseInt(m[2], 10) };
 }
 
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+async function upsertInBatches(supabase, table, rows, onConflict, batchSize = 400) {
+  for (const batch of chunk(rows, batchSize)) {
+    const { error } = await supabase.from(table).upsert(batch, { onConflict });
+    if (error) throw new Error(`${table} upsert failed: ${error.message}`);
+  }
+}
+
+async function insertInBatches(supabase, table, rows, batchSize = 400) {
+  for (const batch of chunk(rows, batchSize)) {
+    const { error } = await supabase.from(table).insert(batch);
+    if (error) throw new Error(`${table} insert failed: ${error.message}`);
+  }
+}
+
 async function main() {
   const env = loadEnv();
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
@@ -96,32 +116,60 @@ async function main() {
   const report = { warnings: [], counts: {} };
 
   // ---- mother_plants ----
+  // The sheet has hundreds of blank template rows (data validation applied
+  // to a wide range with no actual content) mixed in with real ones — only
+  // rows with a real Display_Name are real plants. Of those, one stray row
+  // in the live sheet has no Mother_ID at all; skip it rather than guess.
   const motherIds = new Set();
-  const mothersToInsert = motherRows.map((r) => {
-    const motherId = String(r.Mother_ID || "").trim();
-    motherIds.add(motherId);
-    return {
-      mother_id: motherId,
-      display_name: String(r.Display_Name || "").trim(),
-      location: nullIfBlank(r.Location),
-      genus: nullIfBlank(r.Genus) || "Hoya",
-      species: nullIfBlank(r.Species),
-      qualifier: normalizeQualifier(r.Qualifier),
-      collection_code: nullIfBlank(r.Collection_Code),
-      cultivar: nullIfBlank(r.Cultivar),
-      trade_name: nullIfBlank(r.Trade_Name),
-      hybrid: truthy(r.Hybrid),
-      botanical_line1: nullIfBlank(r.Botanical_Line1),
-      botanical_line2: nullIfBlank(r.Botanical_Line2),
-      print_label: false,
-    };
-  });
+  const skippedNoId = [];
+  const mothersToInsert = motherRows
+    .filter((r) => String(r.Display_Name || "").trim() !== "")
+    .filter((r) => {
+      const hasId = String(r.Mother_ID || "").trim() !== "";
+      if (!hasId) skippedNoId.push(r.Display_Name);
+      return hasId;
+    })
+    .map((r) => {
+      const motherId = String(r.Mother_ID).trim();
+      motherIds.add(motherId);
+      return {
+        mother_id: motherId,
+        display_name: String(r.Display_Name || "").trim(),
+        location: nullIfBlank(r.Location),
+        genus: nullIfBlank(r.Genus) || "Hoya",
+        species: nullIfBlank(r.Species),
+        // Qualifier/Collection_Code/Trade_Name/Hybrid are the v2 columns
+        // from Skrybix_FIXED_v2.gs; as of this migration every real row's
+        // actual naming data lives in form_code/name_type/cultivar/
+        // natural_cultivar instead (see supabase/schema.sql comment).
+        qualifier: normalizeQualifier(r.Qualifier),
+        collection_code: nullIfBlank(r.Collection_Code),
+        cultivar: nullIfBlank(r.Cultivar),
+        trade_name: nullIfBlank(r.Trade_Name),
+        hybrid: truthy(r.Hybrid),
+        botanical_line1: nullIfBlank(r.Botanical_Line1),
+        botanical_line2: nullIfBlank(r.Botanical_Line2),
+        print_label: false,
+        form_code: nullIfBlank(r.Form_Code),
+        name_type: nullIfBlank(r.Name_Type),
+        natural_cultivar: truthy(r.Natural_Cultivar),
+        spec3: nullIfBlank(r.SPEC3),
+        mother_seq: nullIfBlank(r.Mother_Seq),
+        notes: nullIfBlank(r.Notes),
+        species_key: nullIfBlank(r.Species_Key),
+        species_key_2: nullIfBlank(r.Species_Key_2),
+        flower_photo_link: nullIfBlank(r.Flower_Photo_Link),
+      };
+    });
 
-  {
-    const { error } = await supabase.from("mother_plants").upsert(mothersToInsert, { onConflict: "mother_id" });
-    if (error) throw new Error("mother_plants insert failed: " + error.message);
-    report.counts.mother_plants = mothersToInsert.length;
+  if (skippedNoId.length) {
+    report.warnings.push(
+      `Skipped ${skippedNoId.length} mother row(s) with a Display_Name but no Mother_ID: ${skippedNoId.join(", ")}`
+    );
   }
+
+  await upsertInBatches(supabase, "mother_plants", mothersToInsert, "mother_id");
+  report.counts.mother_plants = mothersToInsert.length;
 
   // ---- hoya_species ----
   if (speciesRows) {
@@ -147,8 +195,7 @@ async function main() {
     // fully replace the reference list, not accumulate duplicates.
     const { error: delErr } = await supabase.from("hoya_species").delete().neq("id", -1);
     if (delErr) throw new Error("hoya_species clear failed: " + delErr.message);
-    const { error } = await supabase.from("hoya_species").insert(speciesToInsert);
-    if (error) throw new Error("hoya_species insert failed: " + error.message);
+    await insertInBatches(supabase, "hoya_species", speciesToInsert);
     report.counts.hoya_species = speciesToInsert.length;
   } else {
     report.warnings.push("hoya_species.csv not found — skipped (species tracker will be empty).");
@@ -193,10 +240,7 @@ async function main() {
     });
   }
 
-  if (cuttingsToInsert.length) {
-    const { error } = await supabase.from("cuttings").upsert(cuttingsToInsert, { onConflict: "cutting_id" });
-    if (error) throw new Error("cuttings insert failed: " + error.message);
-  }
+  await upsertInBatches(supabase, "cuttings", cuttingsToInsert, "cutting_id");
   report.counts.cuttings = cuttingsToInsert.length;
   if (!activeCuttingRows) report.warnings.push("label_data_cuttings.csv not found — no active cuttings imported.");
   if (!archivedCuttingRows) report.warnings.push("archive_cuttings.csv not found — no archived/sold cuttings imported.");
@@ -205,10 +249,20 @@ async function main() {
   if (outgoingRows) {
     const outgoingToInsert = [];
     const synthesizedCuttings = [];
+    // Real outgoing_log rows whose cutting already exists in cuttings —
+    // that cutting is definitely sold/gone even though Label_Data_Cuttings
+    // itself still showed Sold=FALSE for it, so mark it sold+archived here
+    // rather than leave active-inventory counts inflated by plants that
+    // have actually already sold.
+    const existingCuttingsToMarkSold = new Map(); // cutting_id -> date_out
 
     for (const r of outgoingRows) {
       const cuttingId = String(r.Cutting_ID || "").trim();
       if (!cuttingId) continue;
+
+      if (importedCuttingIds.has(cuttingId)) {
+        existingCuttingsToMarkSold.set(cuttingId, nullIfBlank(r.Date_Out) || new Date().toISOString());
+      }
 
       if (!importedCuttingIds.has(cuttingId)) {
         // Historical outgoing_log entry whose cutting row no longer exists
@@ -245,9 +299,17 @@ async function main() {
       });
     }
 
-    if (synthesizedCuttings.length) {
-      const { error } = await supabase.from("cuttings").upsert(synthesizedCuttings, { onConflict: "cutting_id" });
-      if (error) throw new Error("synthesized cuttings insert failed: " + error.message);
+    await upsertInBatches(supabase, "cuttings", synthesizedCuttings, "cutting_id");
+
+    if (existingCuttingsToMarkSold.size) {
+      for (const [cuttingId, dateOut] of existingCuttingsToMarkSold) {
+        const { error } = await supabase
+          .from("cuttings")
+          .update({ sold: true, archived_at: dateOut })
+          .eq("cutting_id", cuttingId);
+        if (error) throw new Error(`marking "${cuttingId}" sold failed: ${error.message}`);
+      }
+      report.counts.existing_cuttings_marked_sold = existingCuttingsToMarkSold.size;
     }
 
     if (outgoingToInsert.length) {
@@ -255,8 +317,7 @@ async function main() {
       // reinsert full history on each run rather than risk duplicating rows.
       const { error: delErr } = await supabase.from("outgoing_log").delete().neq("id", -1);
       if (delErr) throw new Error("outgoing_log clear failed: " + delErr.message);
-      const { error } = await supabase.from("outgoing_log").insert(outgoingToInsert);
-      if (error) throw new Error("outgoing_log insert failed: " + error.message);
+      await insertInBatches(supabase, "outgoing_log", outgoingToInsert);
     }
     report.counts.outgoing_log = outgoingToInsert.length;
     report.counts.synthesized_cuttings = synthesizedCuttings.length;
@@ -288,10 +349,7 @@ async function main() {
     })
     .filter((c) => c.next_seq > 1); // no need to seed a row for mothers with no cuttings yet
 
-  if (counterUpserts.length) {
-    const { error } = await supabase.from("mother_cutting_counters").upsert(counterUpserts, { onConflict: "mother_id" });
-    if (error) throw new Error("mother_cutting_counters insert failed: " + error.message);
-  }
+  await upsertInBatches(supabase, "mother_cutting_counters", counterUpserts, "mother_id");
   report.counts.mother_cutting_counters = counterUpserts.length;
 
   console.log("Import complete.");

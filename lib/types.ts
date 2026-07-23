@@ -13,6 +13,15 @@ export type MotherPlant = {
   botanical_line2: string | null;
   print_label: boolean;
   created_at: string;
+  form_code: string | null;
+  name_type: string | null;
+  natural_cultivar: boolean;
+  spec3: string | null;
+  mother_seq: string | null;
+  notes: string | null;
+  species_key: string | null;
+  species_key_2: string | null;
+  flower_photo_link: string | null;
 };
 
 export type Cutting = {
