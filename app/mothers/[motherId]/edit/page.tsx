@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { updateMother } from "../../actions";
+import MotherNamingFields from "@/components/MotherNamingFields";
 import type { MotherPlant } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,9 @@ export default async function EditMotherPage({
   const mother = motherRaw as MotherPlant | null;
   if (!mother) notFound();
 
+  const { data: speciesRows } = await supabase.from("hoya_species").select("species").order("species");
+  const speciesOptions = (speciesRows ?? []).map((r) => r.species as string);
+
   const boundUpdate = updateMother.bind(null, mother.mother_id);
 
   return (
@@ -38,11 +42,19 @@ export default async function EditMotherPage({
         <label>Location</label>
         <input type="text" name="location" defaultValue={mother.location ?? ""} />
 
-        <label>Botanical Line 1 (label)</label>
-        <input type="text" name="botanical_line1" defaultValue={mother.botanical_line1 ?? ""} />
-
-        <label>Botanical Line 2 (label)</label>
-        <input type="text" name="botanical_line2" defaultValue={mother.botanical_line2 ?? ""} />
+        <MotherNamingFields
+          defaultValues={{
+            genus: mother.genus,
+            species: mother.species,
+            form_code: mother.form_code,
+            cultivar: mother.cultivar,
+            name_type: mother.name_type,
+            natural_cultivar: mother.natural_cultivar,
+            botanical_line1: mother.botanical_line1,
+            botanical_line2: mother.botanical_line2,
+          }}
+          speciesOptions={speciesOptions}
+        />
 
         <p>
           <button className="btn" type="submit">

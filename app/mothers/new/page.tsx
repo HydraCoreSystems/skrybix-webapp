@@ -1,8 +1,14 @@
 import { createMother } from "../actions";
+import { getSupabaseServerClient } from "@/lib/supabase";
+import MotherNamingFields from "@/components/MotherNamingFields";
 
 export const dynamic = "force-dynamic";
 
-export default function NewMotherPage({ searchParams }: { searchParams: { error?: string } }) {
+export default async function NewMotherPage({ searchParams }: { searchParams: { error?: string } }) {
+  const supabase = getSupabaseServerClient();
+  const { data: speciesRows } = await supabase.from("hoya_species").select("species").order("species");
+  const speciesOptions = (speciesRows ?? []).map((r) => r.species as string);
+
   return (
     <div className="card">
       <h3 style={{ marginTop: 0 }}>Add Mother Plant</h3>
@@ -17,11 +23,7 @@ export default function NewMotherPage({ searchParams }: { searchParams: { error?
         <label>Location</label>
         <input type="text" name="location" />
 
-        <label>Botanical Line 1 (label)</label>
-        <input type="text" name="botanical_line1" />
-
-        <label>Botanical Line 2 (label)</label>
-        <input type="text" name="botanical_line2" />
+        <MotherNamingFields speciesOptions={speciesOptions} />
 
         <p>
           <button className="btn" type="submit">
