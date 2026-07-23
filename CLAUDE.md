@@ -231,16 +231,28 @@ If a "Hoya Naming Convention Quick Reference Guide" doc isn't in
 
 ## Not yet built (from the brief's open scope decisions)
 
-1. Hoya structured naming entry UI + auto-composition. **The naming
-   composer functions in `Skrybix_FIXED_v2.gs`
-   (`composeHoyaBotanicalLine1_`/`composeHoyaLine2_`) read from
-   Qualifier/Collection_Code/Trade_Name/Hybrid — but real data lives in
-   Form_Code/Name_Type/Cultivar/Natural_Cultivar instead** (see "Core data
-   model" above). Don't port that composer logic as-is; it needs
-   rewriting against the columns that are actually populated, or ask the
-   owner which model should be authoritative going forward.
-2. Hoya_Species In_Collection auto-marking on mother creation/edit — data
-   itself is imported (563 rows), just not the auto-marking behavior.
+1. ~~Hoya structured naming entry UI + auto-composition~~ — **done
+   2026-07-23**. `lib/hoya-naming.ts` composes Botanical_Line1/Line2 from
+   the REAL columns (Genus/Species/Form_Code/Cultivar/Name_Type/
+   Natural_Cultivar), not `Skrybix_FIXED_v2.gs`'s Qualifier/
+   Collection_Code/Trade_Name/Hybrid (blank on every real row) — validated
+   against all 147 real mother_plants rows (146/147 exact match on both
+   lines) before wiring in. `components/MotherNamingFields.tsx` gives a
+   live client-side preview on the mother add/edit forms, with a species
+   `<datalist>` autocomplete against `hoya_species`. The edit page won't
+   silently recompute over an existing manual override (see e.g.
+   `HY-RHM10`'s hand-typed hybrid-cross note) — only starts in "auto" mode
+   when the stored line is empty or already matches the composed value,
+   with a "reset to auto-composed" link to switch back consciously.
+2. ~~Hoya_Species In_Collection auto-marking~~ — **done 2026-07-23**,
+   `lib/species-tracker.ts`, wired into `createMother`/`updateMother`.
+   Marks a species owned the first time it's seen, never un-marks, never
+   overwrites an existing Date_Added. Retroactively backfilled for the
+   147 already-migrated mothers (43 species updated) since the tracker
+   only fires going forward otherwise — re-run that backfill logic if a
+   future bulk import ever adds mothers outside the normal create/edit
+   flow (e.g. a second `scripts/import-sheets-data.mjs` run with new
+   rows).
 3. ~~Data migration from the real Google Sheet~~ — **done 2026-07-23**,
    see "Data migration" above. Re-run `scripts/import-sheets-data.mjs`
    with fresh CSV exports if the Sheet changes significantly before a full
