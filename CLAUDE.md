@@ -34,6 +34,18 @@ cache-busting fetches of the live server (not just eyeballing the UI — the
 Browser preview tool served a stale cached page mid-verification that
 looked like a real bug and wasn't one, see git log for the full story).
 
+**Deployed and live** at https://skrybix-webapp.vercel.app (Vercel project
+`gathering-moss/skrybix-webapp`), **password-protected** via HTTP Basic
+Auth in `middleware.ts` — server-enforced on every request (see
+`middleware.ts`'s comment for why that matters), fails closed if
+`SITE_PASSWORD` isn't set. This is a pragmatic first step, same framing as
+GM Money's own auth decision — real Supabase Auth accounts are the
+eventual target if/when multi-user access matters, not a permanent
+ceiling. Env vars (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+`SITE_URL`, `SITE_PASSWORD`) are set in Vercel's Production environment
+via `vercel env add` — check with `vercel env ls`, don't assume `.env.local`
+is the only place they live.
+
 - `app/` — Next.js App Router pages + Server Actions (`actions.ts` per
   route group) + API routes for CSV export
 - `lib/supabase.ts` — server-only Supabase client (`SUPABASE_SERVICE_ROLE_KEY`,
@@ -208,9 +220,12 @@ If a "Hoya Naming Convention Quick Reference Guide" doc isn't in
    see "Data migration" above. Re-run `scripts/import-sheets-data.mjs`
    with fresh CSV exports if the Sheet changes significantly before a full
    cutover, but this is no longer a blocker.
-4. Auth / multi-user, real hosting deploy, automated backups (roadmap doc
-   calls this "Tier 2" — Supabase gives real auth and hosted Postgres for
-   free when this is ready, unlike the Sheets-era single-password gate).
+4. ~~Real hosting deploy~~ — **done 2026-07-23**, live at
+   https://skrybix-webapp.vercel.app. ~~Basic auth~~ — **done same day**,
+   HTTP Basic Auth via `middleware.ts`. Still open: real multi-user
+   accounts/roles (Supabase Auth) and automated backups (roadmap doc's
+   "Tier 2" — Supabase gives real auth and hosted Postgres for free when
+   this is ready).
 5. Label printer integration — currently CSV export (Brother mail-merge)
    + browser-printed QR sheets, printed manually. See
    `reference/Skrybix_ClaudeCode_Handoff_Brief.md` for the Brother
