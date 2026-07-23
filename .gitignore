@@ -1,5 +1,7 @@
-.venv/
-__pycache__/
-*.pyc
-skrybix.db
-.claude/settings.local.json
+node_modules
+.next
+.env
+.env.local
+.vercel
+.env*
+*.tsbuildinfo
