@@ -19,6 +19,7 @@
     "@types/node": "^20.14.10",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^18.3.3",
+    "csv-parse": "^7.0.1",
     "typescript": "^5.5.3"
   }
 }
