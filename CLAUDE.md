@@ -25,9 +25,14 @@ Mother Plants --(take cuttings)--> Cuttings --(sold)--> Outgoing Log
                                        +--> printable labels (CSV export + browser-printed QR label sheets)
 ```
 
-Implemented and locally build/type-check clean (`npx tsc --noEmit`,
-`npx next build` both pass) — **not yet verified against a real database**,
-see "What's blocking verification" below.
+Implemented, type-checks/builds clean, **and verified end-to-end against
+the real production Supabase database** (2026-07-23): real data migrated
+(147 mother plants, 563 Hoya species, 1066 cuttings, 28 outgoing log
+entries — see "Data migration" below), dashboard/mothers/cuttings/outgoing
+pages all confirmed showing correct real counts via direct DB queries and
+cache-busting fetches of the live server (not just eyeballing the UI — the
+Browser preview tool served a stale cached page mid-verification that
+looked like a real bug and wasn't one, see git log for the full story).
 
 - `app/` — Next.js App Router pages + Server Actions (`actions.ts` per
   route group) + API routes for CSV export
@@ -53,28 +58,43 @@ for all of this (see below) — the naming-automation *UI* isn't wired up
 yet, but the schema isn't a hypothetical future shape, it matches what the
 owner's real data already looks like today.
 
-## What's blocking verification
+## Local setup (Supabase project already exists — "Gathering Moss" / "Skrybix", production tier)
 
-**I cannot create a Supabase account/project myself** (account creation is
-outside what I'm allowed to do unprompted) — the owner needs to:
+1. Get `SUPABASE_URL` and the `service_role` secret key (NOT `anon`) from
+   the owner or the Supabase dashboard (Project Settings → API).
+2. Copy `.env.example` to `.env.local` and fill in `SUPABASE_URL`,
+   `SUPABASE_SERVICE_ROLE_KEY`, and `SITE_URL` (leave as
+   `http://localhost:3000` for local dev; **must** be updated to the real
+   deployed domain before printing any label for real, since QR codes are
+   generated from this value). `.env.local` is gitignored — never commit
+   it, it holds a real secret.
+3. `npm install && npm run dev`.
 
-1. Create a free project at supabase.com (no credit card required for the
-   free tier).
-2. In the Supabase dashboard, run the contents of `supabase/schema.sql`
-   once (SQL Editor → paste → Run).
-3. Copy `.env.example` to `.env.local` and fill in:
-   - `SUPABASE_URL` — Project Settings → API → Project URL
-   - `SUPABASE_SERVICE_ROLE_KEY` — Project Settings → API → `service_role`
-     secret key (NOT the `anon` public key — this app does all DB access
-     server-side with the service role key, so treat `.env.local` as a
-     real secret, never commit it — it's already gitignored)
-   - `SITE_URL` — leave as `http://localhost:3000` for local dev; **must**
-     be updated to the real deployed domain before printing any label for
-     real, since QR codes are generated from this value
+Note from 2026-07-23: multiple `next dev` processes were left orphaned
+across sessions (background task stop didn't always kill the underlying
+OS process, since `npm run dev` spawns a child `next` process). If
+`localhost:3000` behaves strangely or shows stale data, check
+`netstat -ano | grep LISTENING` for stray processes on 3000-3002 and
+`taskkill //F //PID <pid>` them before assuming it's a real bug.
 
-Once that's done: `npm install && npm run dev`, then click through
-mother → cutting → sold → outgoing log → CSV export → label print page in
-a real browser, same as the Flask prototype was verified.
+## Data migration (done 2026-07-23 — script is safe to re-run for future updates)
+
+`scripts/import-sheets-data.mjs` imports CSV exports of the real Sheet
+tabs (see `data/sheets-export/README.md` for exact filenames/instructions)
+into Supabase. Real counts as of the first run: 147 mother plants, 563
+Hoya species, 1066 cuttings (1038 active / 28 sold+archived), 28 outgoing
+log entries.
+
+**Important lesson from this migration, worth remembering for any future
+Sheets-reading work**: the reference `Skrybix_FIXED_v2.gs` file's column
+names do NOT fully match the live sheet — see "Core data model" below for
+what's actually real. Don't trust that file's constants (`COL_QUALIFIER`,
+`COL_COLLECTION_CODE`, etc.) as ground truth for the live spreadsheet
+without checking an actual export first. Also: the sheet has ~847 blank
+template rows (data validation applied to a wide range, no real content)
+mixed into `Mother_Plants`'s 995 total rows — only rows with a non-blank
+`Display_Name` are real plants (147 of the 148 real rows have a
+`Mother_ID`; one stray row has neither and gets skipped).
 
 ## Architecture decisions made porting Sheets → Postgres (adaptations, not scope changes)
 
@@ -115,14 +135,29 @@ cross-project issue, not Skrybix-specific. Worth its own dedicated
 follow-up (test the Next 16 migration properly, in both repos) rather than
 folding into feature work.
 
-## Core data model (validated — do not change without good reason)
+## Core data model (validated against real exported data — do not change without good reason)
 
 - **Mother_Plants** — source-of-truth record for each physical mother
-  plant: Mother_ID, Display_Name, Location, and structured naming fields:
-  Genus, Species, Qualifier (blank / "aff." / "cf." / "sp."),
-  Collection_Code (used with Qualifier="sp."), Cultivar, Trade_Name,
-  Hybrid (boolean). All present in `supabase/schema.sql`; only the naming
-  *auto-composition* (see below) isn't wired into the UI yet.
+  plant. The real live sheet's columns turned out to differ from what
+  `Skrybix_FIXED_v2.gs` describes — both generations are in
+  `supabase/schema.sql`'s `mother_plants` table:
+  - **Actually used, real data on every row**: `genus`, `species`,
+    `form_code` (e.g. "sp" — informal/unidentified marker),
+    `name_type` ("Cultivar" / "Descriptor" / "Form" — says how to read
+    `cultivar`), `cultivar` (holds a real cultivar name OR a collection
+    code/descriptor depending on `name_type`), `natural_cultivar`
+    (boolean), `display_name`, `botanical_line1`/`botanical_line2`
+    (already fully composed, just copy on import — don't re-derive),
+    `location`, `spec3` (3-letter species code embedded in Mother_ID,
+    e.g. "ELL"), `mother_seq` (the numeric suffix, e.g. "01" — real
+    Mother_IDs look like `HY-ELL01`, not the brief's `ALAG-001` example),
+    `notes`, `species_key`/`species_key_2` (sheet-computed lookup keys
+    against Hoya_Species), `flower_photo_link`.
+  - **v2 columns from `Skrybix_FIXED_v2.gs`, present but blank on every
+    real row as of the 2026-07-23 migration**: `qualifier`,
+    `collection_code`, `trade_name`, `hybrid`. Kept in the schema in case
+    they become real once naming-automation UI work starts, but don't
+    assume they're populated or authoritative today.
 - **Cuttings** — cuttings taken from a mother plant. Cutting_ID format is
   `{Mother_ID}-C{seq}` (e.g. `M014-C01`), generated via
   `next_cutting_seq()` — see "Architecture decisions" above.
@@ -159,13 +194,20 @@ If a "Hoya Naming Convention Quick Reference Guide" doc isn't in
 
 ## Not yet built (from the brief's open scope decisions)
 
-1. Hoya structured naming entry UI + auto-composition (Genus/Species/
-   Qualifier/Collection_Code/Cultivar/Trade_Name/Hybrid → Botanical
-   Line1/Line2). Schema is ready; port the composer functions above.
-2. Hoya_Species data import (563-row POWO list) + In_Collection
-   auto-marking on mother creation/edit.
-3. Data migration from the real Google Sheet (Mother_Plants,
-   Hoya_Species, existing Cuttings, Outgoing_Log history).
+1. Hoya structured naming entry UI + auto-composition. **The naming
+   composer functions in `Skrybix_FIXED_v2.gs`
+   (`composeHoyaBotanicalLine1_`/`composeHoyaLine2_`) read from
+   Qualifier/Collection_Code/Trade_Name/Hybrid — but real data lives in
+   Form_Code/Name_Type/Cultivar/Natural_Cultivar instead** (see "Core data
+   model" above). Don't port that composer logic as-is; it needs
+   rewriting against the columns that are actually populated, or ask the
+   owner which model should be authoritative going forward.
+2. Hoya_Species In_Collection auto-marking on mother creation/edit — data
+   itself is imported (563 rows), just not the auto-marking behavior.
+3. ~~Data migration from the real Google Sheet~~ — **done 2026-07-23**,
+   see "Data migration" above. Re-run `scripts/import-sheets-data.mjs`
+   with fresh CSV exports if the Sheet changes significantly before a full
+   cutover, but this is no longer a blocker.
 4. Auth / multi-user, real hosting deploy, automated backups (roadmap doc
    calls this "Tier 2" — Supabase gives real auth and hosted Postgres for
    free when this is ready, unlike the Sheets-era single-password gate).
