@@ -129,3 +129,13 @@ create table if not exists hoya_species (
 );
 
 create unique index if not exists hoya_species_species_idx on hoya_species (lower(species));
+
+-- Single shared site password, hashed (bcrypt), for the login page in
+-- app/login. Singleton row (id always 1) -- this is a pragmatic first
+-- step, not real multi-user accounts. See CLAUDE.md's auth section for
+-- the eventual direction (individual sign-ons).
+create table if not exists site_auth (
+  id            int primary key default 1 check (id = 1),
+  password_hash text not null,
+  updated_at    timestamptz not null default now()
+);

@@ -1,32 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
+import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session";
 
-// Server-enforced HTTP Basic Auth gate. Runs before every request (Vercel
-// Edge Middleware), so it protects API routes and server actions too, not
-// just page navigation — a frontend-only lock screen would be trivially
-// bypassed by hitting a route directly. Deliberately fails closed if
-// SITE_PASSWORD isn't configured, rather than silently letting requests
+// Server-enforced session gate. Runs before every request (Vercel Edge
+// Middleware) except /login itself, so it protects API routes and server
+// actions too, not just page navigation — a frontend-only lock screen
+// would be trivially bypassed by hitting a route directly. Fails closed
+// if AUTH_SECRET isn't configured, rather than silently letting requests
 // through unauthenticated.
-export function middleware(request: NextRequest) {
-  const validPassword = process.env.SITE_PASSWORD;
-  if (!validPassword) {
-    return new NextResponse("Site password not configured", { status: 500 });
+export async function middleware(request: NextRequest) {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) {
+    return new NextResponse("Auth not configured", { status: 500 });
   }
 
-  const authHeader = request.headers.get("authorization");
-  if (authHeader?.startsWith("Basic ")) {
-    const decoded = Buffer.from(authHeader.slice(6), "base64").toString("utf-8");
-    const [, password] = decoded.split(":");
-    if (password === validPassword) {
-      return NextResponse.next();
-    }
+  const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  if (await verifySessionToken(secret, token)) {
+    return NextResponse.next();
   }
 
-  return new NextResponse("Authentication required", {
-    status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="Skrybix"' },
-  });
+  return NextResponse.redirect(new URL("/login", request.url));
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|login).*)"],
 };
