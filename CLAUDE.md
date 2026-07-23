@@ -35,16 +35,41 @@ Browser preview tool served a stale cached page mid-verification that
 looked like a real bug and wasn't one, see git log for the full story).
 
 **Deployed and live** at https://skrybix-webapp.vercel.app (Vercel project
-`gathering-moss/skrybix-webapp`), **password-protected** via HTTP Basic
-Auth in `middleware.ts` — server-enforced on every request (see
-`middleware.ts`'s comment for why that matters), fails closed if
-`SITE_PASSWORD` isn't set. This is a pragmatic first step, same framing as
-GM Money's own auth decision — real Supabase Auth accounts are the
-eventual target if/when multi-user access matters, not a permanent
-ceiling. Env vars (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
-`SITE_URL`, `SITE_PASSWORD`) are set in Vercel's Production environment
-via `vercel env add` — check with `vercel env ls`, don't assume `.env.local`
-is the only place they live.
+`gathering-moss/skrybix-webapp`), **password-protected** via a proper
+login page — not the browser's native Basic Auth popup (that was the
+2026-07-23 first pass, superseded same day once the owner asked for a
+real login page + the ability to change the password without touching
+Vercel config):
+
+- `app/login/` — login page + `login`/`logout` server actions
+- `app/settings/password/` — change-password page + action (requires
+  being logged in already, verified by middleware)
+- `lib/session.ts` — signed session cookie (HMAC-SHA256 via Web Crypto
+  `crypto.subtle`, not Node's `crypto` module, so the exact same code
+  works in both the Edge-runtime middleware and Node-runtime server
+  actions)
+- `lib/site-auth-db.ts` — reads/writes the bcrypt password hash in
+  Supabase's `site_auth` table (singleton row, `id = 1`) — the password
+  is **not** an env var anymore, it's real app data, which is what makes
+  a self-service "change password" page possible
+- `middleware.ts` — redirects unauthenticated requests to `/login`
+  (server-enforced on every request, not just page navigation — see its
+  comment for why that matters), fails closed if `AUTH_SECRET` isn't set
+
+This is still a pragmatic first step, same framing as GM Money's own auth
+decision — real individual Supabase Auth accounts (per-person sign-on,
+not one shared password) are the eventual target for this app **and**
+for `gm-money-webapp` and `hydrocloud-webapp` too, per the owner's
+explicit 2026-07-23 direction. That doesn't mean build it now for those
+other two repos without being asked — just don't be surprised when the
+owner brings it up, and don't assume "one shared password" is a
+permanent design decision for any of the three.
+
+Env vars (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SITE_URL`,
+`AUTH_SECRET`) are set in Vercel's Production environment via
+`vercel env add` — check with `vercel env ls`, don't assume `.env.local`
+is the only place they live. The old `SITE_PASSWORD` env var (Basic Auth
+era) has been removed from Vercel; don't resurrect it.
 
 - `app/` — Next.js App Router pages + Server Actions (`actions.ts` per
   route group) + API routes for CSV export
@@ -221,11 +246,12 @@ If a "Hoya Naming Convention Quick Reference Guide" doc isn't in
    with fresh CSV exports if the Sheet changes significantly before a full
    cutover, but this is no longer a blocker.
 4. ~~Real hosting deploy~~ — **done 2026-07-23**, live at
-   https://skrybix-webapp.vercel.app. ~~Basic auth~~ — **done same day**,
-   HTTP Basic Auth via `middleware.ts`. Still open: real multi-user
-   accounts/roles (Supabase Auth) and automated backups (roadmap doc's
-   "Tier 2" — Supabase gives real auth and hosted Postgres for free when
-   this is ready).
+   https://skrybix-webapp.vercel.app. ~~Password protection~~ — **done
+   same day**, proper login page + change-password feature (see "Current
+   state" above), superseding an earlier same-day Basic Auth pass. Still
+   open: real individual multi-user accounts/roles (Supabase Auth,
+   explicitly wanted eventually for this app and the other two sibling
+   projects too) and automated backups (roadmap doc's "Tier 2").
 5. Label printer integration — currently CSV export (Brother mail-merge)
    + browser-printed QR sheets, printed manually. See
    `reference/Skrybix_ClaudeCode_Handoff_Brief.md` for the Brother
