@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Skrybix Web (prototype)</title>
+  <style>
+    :root { --green: #2f5d3a; --bg: #f7f5f0; --card: #ffffff; --border: #ddd6c9; }
+    body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: var(--bg); color: #222; margin: 0; }
+    header { background: var(--green); color: white; padding: 14px 24px; }
+    header a { color: white; text-decoration: none; margin-right: 18px; font-size: 14px; opacity: 0.9; }
+    header a:hover { opacity: 1; text-decoration: underline; }
+    header .brand { font-weight: 700; font-size: 18px; margin-right: 28px; }
+    main { max-width: 980px; margin: 24px auto; padding: 0 20px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 18px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 14px; }
+    th { color: #555; font-weight: 600; }
+    .btn { display: inline-block; background: var(--green); color: white; border: none; padding: 7px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; text-decoration: none; }
+    .btn.secondary { background: #7a7a72; }
+    .btn.small { padding: 4px 9px; font-size: 12px; }
+    form.inline { display: inline; }
+    input, select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
+    label { font-size: 13px; color: #444; display: block; margin: 8px 0 3px; }
+    .flash { padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 14px; }
+    .flash.success { background: #e4f3e6; color: #1e5c2a; }
+    .flash.error { background: #fbe6e4; color: #8c2b21; }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+    .stat { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; text-align: center; }
+    .stat .num { font-size: 26px; font-weight: 700; color: var(--green); }
+    .stat .label { font-size: 12px; color: #666; }
+    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+    .pill.yes { background:#e4f3e6; color:#1e5c2a; }
+    .pill.no { background:#eee; color:#777; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="brand">🌿 Skrybix (web prototype)</span>
+    <a href="{{ url_for('dashboard') }}">Dashboard</a>
+    <a href="{{ url_for('mothers_list') }}">Mother Plants</a>
+    <a href="{{ url_for('cuttings_list') }}">Cuttings</a>
+    <a href="{{ url_for('outgoing_list') }}">Outgoing Log</a>
+  </header>
+  <main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

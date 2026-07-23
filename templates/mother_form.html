@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h3 style="margin-top:0;">{{ 'Edit' if mother else 'Add' }} Mother Plant</h3>
+  <form method="post">
+    <label>Mother ID {{ '(cannot be changed)' if mother else '' }}</label>
+    {% if mother %}
+      <input type="text" value="{{ mother.mother_id }}" disabled>
+    {% else %}
+      <input type="text" name="mother_id" required placeholder="e.g. M014">
+    {% endif %}
+
+    <label>Display Name</label>
+    <input type="text" name="display_name" value="{{ mother.display_name if mother else '' }}" required>
+
+    <label>Location</label>
+    <input type="text" name="location" value="{{ mother.location if mother else '' }}">
+
+    <label>Botanical Line 1 (label)</label>
+    <input type="text" name="botanical_line1" value="{{ mother.botanical_line1 if mother else '' }}">
+
+    <label>Botanical Line 2 (label)</label>
+    <input type="text" name="botanical_line2" value="{{ mother.botanical_line2 if mother else '' }}">
+
+    <p><button class="btn" type="submit">Save</button>
+    <a class="btn secondary" href="{{ url_for('mothers_list') }}">Cancel</a></p>
+  </form>
+</div>
+{% endblock %}

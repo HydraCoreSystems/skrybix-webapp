@@ -1,0 +1,4 @@
+flask>=3.1
+qrcode>=8.0
+reportlab>=4.5
+pillow>=12.0

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h3 style="margin-top:0;">Take Cuttings</h3>
+  <p style="color:#666; font-size:13px;">This replaces the Google Form → onFormSubmit flow. It writes directly and generates unique Cutting IDs the same way (Mother_ID-C01, -C02, ...) but without the row-number dedupe fragility.</p>
+  <form method="post">
+    <label>Mother Plant</label>
+    <select name="mother_id" required>
+      {% for m in mothers %}
+      <option value="{{ m.mother_id }}">{{ m.mother_id }} — {{ m.display_name }}</option>
+      {% endfor %}
+    </select>
+
+    <label>Number of new cuttings</label>
+    <input type="number" name="num_cuts" min="1" value="1" required>
+
+    <label>Date taken</label>
+    <input type="date" name="date_taken">
+
+    <p><button class="btn" type="submit">Create Cuttings</button></p>
+  </form>
+</div>
+{% endblock %}

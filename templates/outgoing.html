@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h3 style="margin-top:0;">Outgoing Log</h3>
+  <table>
+    <tr><th>Date Out</th><th>Cutting ID</th><th>Plant</th><th>Qty</th><th>Reason</th><th>Platform</th><th>Notes</th></tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.date_out }}</td>
+      <td>{{ r.cutting_id }}</td>
+      <td>{{ r.full_display_name }}</td>
+      <td>{{ r.qty }}</td>
+      <td>{{ r.reason }}</td>
+      <td>{{ r.selling_platform }}</td>
+      <td>{{ r.notes }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

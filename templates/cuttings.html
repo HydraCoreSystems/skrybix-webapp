@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h3 style="margin-top:0;">Cuttings</h3>
+  <a class="btn" href="{{ url_for('cuttings_new') }}">+ Take Cuttings</a>
+  <a class="btn secondary" href="{{ url_for('export_cuttings_csv') }}">Export queued → CSV</a>
+  <a class="btn secondary" href="{{ url_for('export_cuttings_pdf') }}">Export queued → PDF labels</a>
+  <form class="inline" method="post" action="{{ url_for('push_sold') }}">
+    <button class="btn secondary" type="submit">Push Sold → Outgoing Log</button>
+  </form>
+
+  <table>
+    <tr><th>Cutting ID</th><th>Mother</th><th>Date Taken</th><th>Sold?</th><th>Print?</th></tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.cutting_id }}</td>
+      <td>{{ r.mother_display_name }} ({{ r.mother_id }})</td>
+      <td>{{ r.date_taken }}</td>
+      <td>
+        <form class="inline" method="post" action="{{ url_for('cuttings_toggle', cutting_id=r.cutting_id) }}">
+          <input type="hidden" name="field" value="sold">
+          <button class="btn small {{ '' if r.sold else 'secondary' }}" type="submit">
+            {{ 'Sold ✓' if r.sold else 'Mark sold' }}
+          </button>
+        </form>
+      </td>
+      <td>
+        <form class="inline" method="post" action="{{ url_for('cuttings_toggle', cutting_id=r.cutting_id) }}">
+          <input type="hidden" name="field" value="print_label">
+          <button class="btn small {{ '' if r.print_label else 'secondary' }}" type="submit">
+            {{ 'Queued ✓' if r.print_label else 'Queue for print' }}
+          </button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

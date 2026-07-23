@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="stat-grid">
+  <div class="stat"><div class="num">{{ mother_count }}</div><div class="label">Mother Plants</div></div>
+  <div class="stat"><div class="num">{{ cutting_count }}</div><div class="label">Active Cuttings</div></div>
+  <div class="stat"><div class="num">{{ sold_pending }}</div><div class="label">Marked Sold (pending push)</div></div>
+  <div class="stat"><div class="num">{{ outgoing_count }}</div><div class="label">Outgoing Log Entries</div></div>
+  <div class="stat"><div class="num">{{ print_mothers }}</div><div class="label">Mother Labels Queued</div></div>
+  <div class="stat"><div class="num">{{ print_cuttings }}</div><div class="label">Cutting Labels Queued</div></div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Recent Outgoing Activity</h3>
+  {% if recent_outgoing %}
+  <table>
+    <tr><th>Date Out</th><th>Cutting ID</th><th>Plant</th><th>Qty</th><th>Reason</th></tr>
+    {% for r in recent_outgoing %}
+    <tr>
+      <td>{{ r.date_out }}</td>
+      <td>{{ r.cutting_id }}</td>
+      <td>{{ r.full_display_name }}</td>
+      <td>{{ r.qty }}</td>
+      <td>{{ r.reason }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p>No outgoing activity yet.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Quick actions</h3>
+  <a class="btn" href="{{ url_for('mothers_new') }}">+ Add Mother Plant</a>
+  <a class="btn" href="{{ url_for('cuttings_new') }}">+ Take Cuttings</a>
+</div>
+{% endblock %}

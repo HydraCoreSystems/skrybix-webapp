@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h3 style="margin-top:0;">Mother Plants</h3>
+  <a class="btn" href="{{ url_for('mothers_new') }}">+ Add Mother Plant</a>
+  <a class="btn secondary" href="{{ url_for('export_mothers_csv') }}">Export queued → CSV</a>
+  <a class="btn secondary" href="{{ url_for('export_mothers_pdf') }}">Export queued → PDF labels</a>
+
+  <table>
+    <tr><th>Mother ID</th><th>Display Name</th><th>Location</th><th>Botanical</th><th>Print?</th><th></th></tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.mother_id }}</td>
+      <td>{{ r.display_name }}</td>
+      <td>{{ r.location }}</td>
+      <td>{{ r.botanical_line1 }}<br><small>{{ r.botanical_line2 }}</small></td>
+      <td>
+        <form class="inline" method="post" action="{{ url_for('mothers_flag_print', mother_id=r.mother_id) }}">
+          <input type="hidden" name="value" value="{{ 0 if r.print_label else 1 }}">
+          <button class="btn small {{ '' if r.print_label else 'secondary' }}" type="submit">
+            {{ 'Queued ✓' if r.print_label else 'Queue for print' }}
+          </button>
+        </form>
+      </td>
+      <td>
+        <a class="btn small secondary" href="{{ url_for('mothers_edit', mother_id=r.mother_id) }}">Edit</a>
+        <a class="btn small secondary" href="{{ url_for('public_plant', mother_id=r.mother_id) }}" target="_blank">View public page</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

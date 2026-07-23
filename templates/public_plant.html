@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ mother.display_name }} — Skrybix</title>
+  <style>
+    body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#f7f5f0; margin:0; padding:24px; color:#222; }
+    .card { max-width: 480px; margin: 0 auto; background:white; border-radius:12px; padding:24px; border:1px solid #ddd6c9; }
+    h1 { font-size: 20px; margin: 0 0 4px; color:#2f5d3a; }
+    .sub { color:#666; font-size:13px; margin-bottom:16px; }
+    .row { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid #eee; font-size:14px; }
+    ul { padding-left: 18px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>{{ mother.display_name }}</h1>
+    <div class="sub">{{ mother.botanical_line1 }} {{ mother.botanical_line2 }}</div>
+    <div class="row"><span>Mother ID</span><strong>{{ mother.mother_id }}</strong></div>
+    <div class="row"><span>Location</span><strong>{{ mother.location }}</strong></div>
+    <div class="row"><span>Active cuttings</span><strong>{{ cuttings|selectattr("sold", "equalto", 0)|list|length }}</strong></div>
+    <h3>Cuttings from this mother</h3>
+    <ul>
+      {% for c in cuttings %}
+      <li>{{ c.cutting_id }} — {{ 'sold' if c.sold else 'in stock' }} ({{ c.date_taken }})</li>
+      {% else %}
+      <li>None yet</li>
+      {% endfor %}
+    </ul>
+  </div>
+</body>
+</html>
