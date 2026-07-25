@@ -286,12 +286,36 @@ If a "Hoya Naming Convention Quick Reference Guide" doc isn't in
    a caught-and-corrected error: an initial "2 cols × 15 rows" read of a
    low-detail template image was physically impossible and wrong — 3×10
    is correct, confirmed against the owner's actual downloaded Avery
-   PDF). **Next step is a real test print** — adjust the four `--sheet-*`
-   variables based on what the owner reports, nothing else should need
-   to change. The Phomemo M220 was evaluated and ruled out (20mm minimum
-   width can't run the existing 18mm tape; no official SDK, only
-   reverse-engineered community tools of uncertain maturity for this
-   model specifically).
+   PDF). **Grid alignment confirmed correct via a real physical test
+   print** — the `--sheet-*` margin/gap values (borrowed from the
+   OnlineLabels OL6950 spec) worked on the owner's real Avery 8257 sheets
+   with zero adjustment needed. The Phomemo M220 was evaluated and ruled
+   out (20mm minimum width can't run the existing 18mm tape; no official
+   SDK, only reverse-engineered community tools of uncertain maturity for
+   this model specifically).
+
+   **Real branding now wired in** (2026-07-25): `public/gm-logo.png`
+   (real Gathering Moss logo, verified via direct RGBA pixel inspection
+   to be a clean, correctly-transparent PNG — an earlier look at two
+   other candidate files wrongly flagged them as corrupted, when the
+   real problem was a local image-preview tool not compositing alpha
+   transparency correctly, not the files themselves) appears on cutting
+   labels only, matching the real physical Brother tape design exactly
+   (`GM_Cutting_Label_18mm.lbx` has a logo + Instagram QR target,
+   `GM_Mother_Label_18mm.lbx` has neither) — decoded directly from both
+   real `.lbx` files (they're ZIP archives containing XML, same
+   unzip-and-read approach as the `.docx` files elsewhere in this
+   project). The cutting QR still points at `/plant/cutting/[id]` (the
+   app's own tracking page), but that page now also shows a "Follow on
+   Instagram" button, preserving the marketing reach the physical labels
+   already had rather than silently dropping it in favor of pure
+   tracking data. **Caught a real bug while verifying this**: `/plant/**`
+   and `public/gm-logo.png` were never excluded from `middleware.ts`'s
+   login requirement — any real customer scanning a physical QR code
+   would have hit the site password screen instead of the intended
+   public page. Fixed and verified with zero-cookie requests simulating
+   a real scan, both locally and on production, before any real labels
+   shipped with that URL on them.
 6. Next.js 14→16 migration to clear the residual CVEs noted above
    (cross-project with `hydrocloud-webapp`).
 
