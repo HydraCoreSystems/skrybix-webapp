@@ -264,11 +264,34 @@ If a "Hoya Naming Convention Quick Reference Guide" doc isn't in
    open: real individual multi-user accounts/roles (Supabase Auth,
    explicitly wanted eventually for this app and the other two sibling
    projects too) and automated backups (roadmap doc's "Tier 2").
-5. Label printer integration — currently CSV export (Brother mail-merge)
-   + browser-printed QR sheets, printed manually. See
-   `reference/Skrybix_ClaudeCode_Handoff_Brief.md` for the Brother
-   PT-P710BT vs. Zebra ZD411/ZPL discussion — no printer purchased yet,
-   deliberately deferred.
+5. ~~Label printer integration~~ — **direction settled 2026-07-25**. The
+   Brother PT-P710BT (18mm continuous tape, USB) stays as the CSV →
+   P-touch Editor mail-merge bridge for now — full automation via
+   Brother's b-PAC SDK was already attempted in an earlier session and
+   hit real, confirmed technical walls (COM parameter marshaling issues).
+   Cloud code (Vercel) can never reach a USB printer directly regardless
+   — that's a hard architectural limit, not a "not built yet" gap.
+   **Going forward, the owner is testing a full-sheet-label approach
+   instead**: HP Smart Tank 7602r (standard network inkjet, no SDK
+   needed) + Avery 8257 return address labels (0.75in × 2.25in, 30/sheet,
+   3 cols × 10 rows). `app/labels/mothers` and `app/labels/cuttings` now
+   render a print-accurate grid matching that exact sheet (see
+   `app/globals.css`'s `--label-*`/`--sheet-*` custom properties) —
+   "queue for print → open page → Ctrl+P," no CSV/mail-merge step needed
+   at all. **Not yet physically verified** — margins/gaps are the
+   OnlineLabels OL6950 product's confirmed-exact numbers for the
+   identical label footprint (a real starting point, not a guess), but
+   Avery 8257's own exact margins were never extracted with full
+   confidence (see git log ~2026-07-25 for the research trail, including
+   a caught-and-corrected error: an initial "2 cols × 15 rows" read of a
+   low-detail template image was physically impossible and wrong — 3×10
+   is correct, confirmed against the owner's actual downloaded Avery
+   PDF). **Next step is a real test print** — adjust the four `--sheet-*`
+   variables based on what the owner reports, nothing else should need
+   to change. The Phomemo M220 was evaluated and ruled out (20mm minimum
+   width can't run the existing 18mm tape; no official SDK, only
+   reverse-engineered community tools of uncertain maturity for this
+   model specifically).
 6. Next.js 14→16 migration to clear the residual CVEs noted above
    (cross-project with `hydrocloud-webapp`).
 
