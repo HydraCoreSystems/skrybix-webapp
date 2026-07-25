@@ -50,7 +50,8 @@ create table if not exists mother_plants (
   notes            text,
   species_key      text,
   species_key_2    text,
-  flower_photo_link text
+  flower_photo_link text,
+  scan_count       int not null default 0
 );
 
 -- Persistent, never-reused per-mother cutting sequence counter.
@@ -88,10 +89,30 @@ create table if not exists cuttings (
   sold               boolean not null default false,
   print_label        boolean not null default false,
   archived_at        timestamptz,
-  created_at         timestamptz not null default now()
+  created_at         timestamptz not null default now(),
+  scan_count         int not null default 0
 );
 
 create index if not exists cuttings_active_idx on cuttings (mother_id) where archived_at is null;
+
+-- QR-scan tracking: a page load on a public /plant/** page is a very
+-- reliable stand-in for "someone scanned this" since those URLs aren't
+-- linked anywhere else or guessable -- not a literal scan-event log, just
+-- a simple running total per the owner's request. Atomic UPDATE, not a
+-- read-then-write, so concurrent scans can't clobber each other.
+create or replace function increment_mother_scan_count(p_mother_id text)
+returns void
+language sql
+as $$
+  update mother_plants set scan_count = scan_count + 1 where mother_id = p_mother_id;
+$$;
+
+create or replace function increment_cutting_scan_count(p_cutting_id text)
+returns void
+language sql
+as $$
+  update cuttings set scan_count = scan_count + 1 where cutting_id = p_cutting_id;
+$$;
 
 create table if not exists outgoing_log (
   id                 bigint generated always as identity primary key,

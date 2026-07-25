@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "skrybix-flask",
-      "runtimeExecutable": "C:\\Users\\pwach\\OneDrive\\Desktop\\skrybix-webapp\\.venv\\Scripts\\python.exe",
-      "runtimeArgs": ["app.py"],
-      "port": 5000
+      "name": "skrybix-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000
     }
   ]
 }

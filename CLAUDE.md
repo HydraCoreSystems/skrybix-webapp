@@ -318,6 +318,17 @@ If a "Hoya Naming Convention Quick Reference Guide" doc isn't in
    shipped with that URL on them.
 6. Next.js 14→16 migration to clear the residual CVEs noted above
    (cross-project with `hydrocloud-webapp`).
+7. ~~QR scan-count tracking~~ — **done 2026-07-25**. Simple running total
+   per the owner's explicit request ("simple," not a detailed scan-event
+   log). `mother_plants.scan_count` / `cuttings.scan_count`, incremented
+   via atomic `increment_mother_scan_count()` / `increment_cutting_scan_count()`
+   Postgres functions (plain `UPDATE ... SET scan_count = scan_count + 1`,
+   not a read-then-write, so concurrent scans can't clobber each other).
+   A page load on the public `/plant/**` pages is used as the stand-in for
+   "someone scanned this" — those URLs aren't linked anywhere else or
+   guessable, so a load is a reliable proxy for a real scan. Shown as a
+   "Scans" column on the Mothers and Cuttings list pages. Verified against
+   the live Supabase DB (not just the UI) before/after two real scans.
 
 Ask the owner before starting on any of these — scope order hasn't been
 confirmed yet.

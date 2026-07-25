@@ -21,6 +21,8 @@ export default async function PublicCuttingPage({ params }: { params: { cuttingI
   const cutting = cuttingRaw as Cutting | null;
   if (!cutting) notFound();
 
+  await supabase.rpc("increment_cutting_scan_count", { p_cutting_id: params.cuttingId });
+
   return (
     <div className="card">
       <h3 style={{ marginTop: 0 }}>{cutting.cutting_id}</h3>

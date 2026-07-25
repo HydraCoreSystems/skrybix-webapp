@@ -48,6 +48,7 @@ export default async function CuttingsPage({
             <th>Date Taken</th>
             <th>Sold?</th>
             <th>Print?</th>
+            <th>Scans</th>
           </tr>
         </thead>
         <tbody>
@@ -72,6 +73,7 @@ export default async function CuttingsPage({
                   </button>
                 </form>
               </td>
+              <td>{c.scan_count}</td>
             </tr>
           ))}
         </tbody>

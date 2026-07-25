@@ -15,6 +15,8 @@ export default async function PublicPlantPage({ params }: { params: { motherId: 
   const mother = motherRaw as MotherPlant | null;
   if (!mother) notFound();
 
+  await supabase.rpc("increment_mother_scan_count", { p_mother_id: params.motherId });
+
   const { data: cuttingsRaw } = await supabase
     .from("cuttings")
     .select("*")

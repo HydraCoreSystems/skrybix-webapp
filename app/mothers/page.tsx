@@ -36,6 +36,7 @@ export default async function MothersPage({
             <th>Location</th>
             <th>Botanical</th>
             <th>Print?</th>
+            <th>Scans</th>
             <th></th>
           </tr>
         </thead>
@@ -57,6 +58,7 @@ export default async function MothersPage({
                   </button>
                 </form>
               </td>
+              <td>{m.scan_count}</td>
               <td>
                 <Link className="btn small secondary" href={`/mothers/${encodeURIComponent(m.mother_id)}/edit`}>
                   Edit

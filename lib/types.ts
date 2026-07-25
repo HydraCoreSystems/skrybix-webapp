@@ -22,6 +22,7 @@ export type MotherPlant = {
   species_key: string | null;
   species_key_2: string | null;
   flower_photo_link: string | null;
+  scan_count: number;
 };
 
 export type Cutting = {
@@ -35,6 +36,7 @@ export type Cutting = {
   print_label: boolean;
   archived_at: string | null;
   created_at: string;
+  scan_count: number;
 };
 
 export type OutgoingLogEntry = {
