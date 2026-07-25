@@ -172,43 +172,91 @@ label {
   color: var(--muted);
 }
 
-.label-grid {
+/* Avery 8257 label sheet (0.75in x 2.25in, 30/sheet, 3 cols x 10 rows on
+   US Letter). Margins/gaps below are the OnlineLabels OL6950 product's
+   CONFIRMED exact spec for the identical label footprint -- a real,
+   precise starting point, not a guess -- but not verified against
+   Avery's own physical sheet yet. Adjust these four --sheet-* variables
+   after a real test print; nothing else needs to change. */
+:root {
+  --label-width: 2.25in;
+  --label-height: 0.75in;
+  --label-col-gap: 0.5in;
+  --label-row-gap: 0.25in;
+  --sheet-margin-top: 0.625in;
+  --sheet-margin-left: 0.375in;
+}
+
+.label-sheet {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(3, var(--label-width));
+  grid-auto-rows: var(--label-height);
+  column-gap: var(--label-col-gap);
+  row-gap: var(--label-row-gap);
+  padding-top: var(--sheet-margin-top);
+  padding-left: var(--sheet-margin-left);
 }
 
-.label-tile {
-  border: 1px solid #999;
-  border-radius: var(--radius-sm);
-  padding: 8px;
+.label-cell {
+  width: var(--label-width);
+  height: var(--label-height);
+  box-sizing: border-box;
+  padding: 0.04in;
   display: flex;
-  gap: 10px;
   align-items: center;
+  gap: 0.05in;
+  overflow: hidden;
+  font-size: 6pt;
+  line-height: 1.15;
 }
 
-.label-tile img {
-  width: 64px;
-  height: 64px;
+.label-cell img {
+  width: 0.55in;
+  height: 0.55in;
+  flex-shrink: 0;
 }
 
-.label-tile .id {
+.label-cell .text {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.label-cell .id {
   font-weight: 700;
-  font-size: 12px;
+  font-size: 6.5pt;
 }
 
-.label-tile .line {
-  font-size: 11px;
+/* On-screen only: faint outline so the sheet's real proportions are
+   visible while reviewing the queue, without printing an actual border
+   onto the label stock. */
+.label-cell {
+  outline: 1px dashed #ccc;
+}
+@media print {
+  .label-cell {
+    outline: none;
+  }
 }
 
 @media print {
+  @page {
+    size: letter;
+    margin: 0;
+  }
   header.topnav,
   .no-print {
     display: none !important;
   }
+  body,
   main {
-    max-width: none;
     margin: 0;
+    padding: 0;
+    max-width: none;
+  }
+  .card {
+    border: none;
     padding: 0;
   }
 }

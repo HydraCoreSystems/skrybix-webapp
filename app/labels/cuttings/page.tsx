@@ -36,12 +36,12 @@ export default async function CuttingLabelsPage() {
       {items.length === 0 ? (
         <p className="no-print">Nothing queued. Go to Cuttings and click &quot;Queue for print.&quot;</p>
       ) : (
-        <div className="label-grid">
+        <div className="label-sheet">
           {items.map((item) => (
-            <div className="label-tile" key={item.id}>
+            <div className="label-cell" key={item.id}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={item.qr} alt="" />
-              <div>
+              <div className="text">
                 <div className="id">{item.id}</div>
                 <div className="line">{item.line1}</div>
                 <div className="line">{item.line2}</div>
