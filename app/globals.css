@@ -210,10 +210,25 @@ label {
   line-height: 1.15;
 }
 
-.label-cell img {
+.label-cell img.qr {
   width: 0.55in;
   height: 0.55in;
   flex-shrink: 0;
+}
+
+/* Cutting labels only -- mother labels have no logo, matching the real
+   physical Brother tape design (GM_Mother_Label_18mm.lbx has none,
+   GM_Cutting_Label_18mm.lbx does). QR shrinks slightly to make room. */
+.label-cell img.logo {
+  width: 0.45in;
+  height: 0.45in;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.label-cell.cutting img.qr {
+  width: 0.48in;
+  height: 0.48in;
 }
 
 .label-cell .text {

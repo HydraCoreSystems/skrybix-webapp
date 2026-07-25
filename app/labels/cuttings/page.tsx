@@ -38,14 +38,16 @@ export default async function CuttingLabelsPage() {
       ) : (
         <div className="label-sheet">
           {items.map((item) => (
-            <div className="label-cell" key={item.id}>
+            <div className="label-cell cutting" key={item.id}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={item.qr} alt="" />
+              <img className="logo" src="/gm-logo.png" alt="" />
               <div className="text">
                 <div className="id">{item.id}</div>
                 <div className="line">{item.line1}</div>
                 <div className="line">{item.line2}</div>
               </div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className="qr" src={item.qr} alt="" />
             </div>
           ))}
         </div>
