@@ -255,6 +255,69 @@ label {
   }
 }
 
+/* Starting-position picker for printing onto a partially-used label
+   sheet — a 3x10 grid matching the physical Avery 8257 layout, so
+   picking a slot maps directly onto the leftover blank label the user
+   is looking at. Screen-only (.no-print already hides it on print). */
+.start-picker {
+  display: inline-grid;
+  grid-template-columns: repeat(3, 34px);
+  grid-auto-rows: 26px;
+  gap: 4px;
+}
+
+.picker-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  text-decoration: none;
+  color: var(--text);
+  background: #fff;
+}
+
+.picker-cell:hover {
+  border-color: var(--green);
+}
+
+.picker-cell.used {
+  background: #eee;
+  color: #999;
+}
+
+.picker-cell.will-print {
+  background: var(--green-light);
+  border-color: var(--green);
+  color: #1e5c2a;
+  font-weight: 700;
+}
+
+.picker-legend {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin: 0 4px 0 10px;
+  vertical-align: middle;
+}
+
+.picker-legend.used {
+  background: #eee;
+  border: 1px solid var(--border);
+}
+
+.picker-legend.will-print {
+  background: var(--green-light);
+  border: 1px solid var(--green);
+}
+
+.picker-legend.empty {
+  background: #fff;
+  border: 1px solid var(--border);
+}
+
 @media print {
   @page {
     size: letter;

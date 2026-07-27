@@ -2,11 +2,18 @@ import { getSupabaseServerClient } from "@/lib/supabase";
 import { publicPlantUrl, qrDataUri } from "@/lib/qr";
 import { clearMotherPrintQueue } from "../actions";
 import PrintButton from "@/components/PrintButton";
+import LabelStartPicker from "@/components/LabelStartPicker";
+import { parseStartPosition } from "@/lib/labels";
 import type { MotherPlant } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function MotherLabelsPage() {
+export default async function MotherLabelsPage({
+  searchParams,
+}: {
+  searchParams: { start?: string };
+}) {
+  const start = parseStartPosition(searchParams.start);
   const supabase = getSupabaseServerClient();
   const { data: rowsRaw } = await supabase.from("mother_plants").select("*").eq("print_label", true);
   const rows = (rowsRaw ?? []) as MotherPlant[];
@@ -36,19 +43,25 @@ export default async function MotherLabelsPage() {
       {items.length === 0 ? (
         <p className="no-print">Nothing queued. Go to Mother Plants and click &quot;Queue for print.&quot;</p>
       ) : (
-        <div className="label-sheet">
-          {items.map((item) => (
-            <div className="label-cell" key={item.id}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img className="qr" src={item.qr} alt="" />
-              <div className="text">
-                <div className="id">{item.id}</div>
-                <div className="line">{item.line1}</div>
-                <div className="line">{item.line2}</div>
+        <>
+          <LabelStartPicker basePath="/labels/mothers" start={start} count={items.length} />
+          <div className="label-sheet">
+            {Array.from({ length: start - 1 }).map((_, i) => (
+              <div className="label-cell" key={`blank-${i}`} />
+            ))}
+            {items.map((item) => (
+              <div className="label-cell" key={item.id}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className="qr" src={item.qr} alt="" />
+                <div className="text">
+                  <div className="id">{item.id}</div>
+                  <div className="line">{item.line1}</div>
+                  <div className="line">{item.line2}</div>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

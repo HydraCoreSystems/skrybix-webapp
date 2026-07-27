@@ -271,9 +271,11 @@ If a "Hoya Naming Convention Quick Reference Guide" doc isn't in
    hit real, confirmed technical walls (COM parameter marshaling issues).
    Cloud code (Vercel) can never reach a USB printer directly regardless
    — that's a hard architectural limit, not a "not built yet" gap.
-   **Going forward, the owner is testing a full-sheet-label approach
-   instead**: HP Smart Tank 7602r (standard network inkjet, no SDK
-   needed) + Avery 8257 return address labels (0.75in × 2.25in, 30/sheet,
+   **Confirmed permanent by the owner 2026-07-25** (previously just "the
+   direction being tested off one successful print" — now explicitly the
+   settled choice, not provisional): HP Smart Tank 7602r (standard network
+   inkjet, no SDK needed) + Avery 8257 return address labels (0.75in ×
+   2.25in, 30/sheet,
    3 cols × 10 rows). `app/labels/mothers` and `app/labels/cuttings` now
    render a print-accurate grid matching that exact sheet (see
    `app/globals.css`'s `--label-*`/`--sheet-*` custom properties) —
@@ -329,6 +331,23 @@ If a "Hoya Naming Convention Quick Reference Guide" doc isn't in
    guessable, so a load is a reliable proxy for a real scan. Shown as a
    "Scans" column on the Mothers and Cuttings list pages. Verified against
    the live Supabase DB (not just the UI) before/after two real scans.
+8. ~~Partial-sheet label printing~~ — **done 2026-07-25**. The owner
+   confirmed the HP Smart Tank 7602r + Avery 8257 direction (item 5 above)
+   is now permanent, and raised a real practical gap: he won't always have
+   enough mothers/cuttings queued to fill an entire 30-label sheet, and
+   needs to resume printing onto a partially-used physical sheet without
+   double-printing over already-used labels. Solved with a starting-position
+   picker (`components/LabelStartPicker.tsx`, `lib/labels.ts`) on both
+   `app/labels/mothers` and `app/labels/cuttings` — a 3x10 grid matching
+   the physical sheet layout, driven by a `?start=N` query param (no DB
+   persistence; the owner explicitly said he'll set it manually every time
+   rather than have the app try to remember the last stopping point). The
+   print grid renders `start - 1` empty filler `.label-cell` divs before
+   the real items so real content lands in the correct physical slot;
+   warns (doesn't block) if the run would overflow onto a second sheet.
+   Verified via direct DOM inspection (blank-cell count, picker
+   used/will-print/empty class states, real link-click navigation) against
+   the real queued print data, not just visual screenshots.
 
 Ask the owner before starting on any of these — scope order hasn't been
 confirmed yet.
