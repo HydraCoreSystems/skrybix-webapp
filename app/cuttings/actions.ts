@@ -72,6 +72,9 @@ export async function toggleCuttingField(cuttingId: string, field: "sold" | "pri
     .update({ [field]: value })
     .eq("cutting_id", cuttingId);
   revalidatePath("/cuttings");
+  if (field === "print_label") {
+    revalidatePath("/labels/cuttings");
+  }
 }
 
 export async function pushSoldToOutgoingLog() {

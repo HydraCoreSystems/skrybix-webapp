@@ -77,4 +77,5 @@ export async function toggleMotherPrint(motherId: string, value: boolean) {
   const supabase = getSupabaseServerClient();
   await supabase.from("mother_plants").update({ print_label: value }).eq("mother_id", motherId);
   revalidatePath("/mothers");
+  revalidatePath("/labels/mothers");
 }

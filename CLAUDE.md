@@ -348,6 +348,27 @@ If a "Hoya Naming Convention Quick Reference Guide" doc isn't in
    Verified via direct DOM inspection (blank-cell count, picker
    used/will-print/empty class states, real link-click navigation) against
    the real queued print data, not just visual screenshots.
+9. ~~"Queued ✓" not reflecting on the labels page~~ — **fixed 2026-07-25**.
+   Real bug, found from the owner's own report: `toggleCuttingField` and
+   `toggleMotherPrint` only called `revalidatePath` on the list page
+   (`/cuttings` / `/mothers`), never on the corresponding labels page
+   (`/labels/cuttings` / `/labels/mothers`). `revalidatePath` is also what
+   invalidates Next.js's *client-side* router cache for a path, not just
+   server data — so a browser that had visited a labels page earlier in
+   the session kept serving a stale cached snapshot after queuing new
+   items, even though `dynamic = "force-dynamic"` guarantees a fresh
+   *server* render. `clearMotherPrintQueue`/`clearCuttingPrintQueue`
+   already revalidated both paths correctly — the toggle actions were the
+   only ones missing it. Real-world consequence: the owner queued 10
+   cuttings, the labels page showed a stale "0 queued" from an earlier
+   visit, and clicking "Clear print queue" from that confusing state
+   really did wipe the (actually-queued) rows back to `print_label =
+   false`, regardless of what the stale UI displayed — confirmed directly
+   against the production DB, not guessed. Fix: both toggle actions now
+   also revalidate their labels-page counterpart. Verified by reproducing
+   the exact stale-cache sequence locally (visit labels page → toggle a
+   real cutting from the list → client-side nav back to the labels page)
+   and confirming the fresh item appears immediately post-fix.
 
 Ask the owner before starting on any of these — scope order hasn't been
 confirmed yet.
