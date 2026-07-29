@@ -1,20 +1,16 @@
 import { notFound, redirect } from "next/navigation";
 import { getSupabaseServerClient } from "@/lib/supabase";
+import { CUTTING_INSTAGRAM_URL } from "@/lib/qr";
 
 export const dynamic = "force-dynamic";
 
-// Fixed brand handle, matches the QR code already printed on the
-// physical Brother cutting labels (GM_Cutting_Label_18mm.lbx) — update
-// here if the handle ever changes.
-const INSTAGRAM_HANDLE = "gathering_moss_ftw";
-const INSTAGRAM_URL = `https://www.instagram.com/${INSTAGRAM_HANDLE}`;
-
-// A cutting label ships out with the plant to a real customer -- they
-// must never see any part of the internal Skrybix app (nav, branding,
-// inventory data), only the business's actual public presence. This
-// page exists purely to record a scan (scan_count) and then redirect
-// straight to Instagram before anything renders, matching what the
-// original physical Brother labels did (QR -> Instagram directly).
+// Newly generated cutting QR codes now encode CUTTING_INSTAGRAM_URL
+// directly (see lib/qr.ts) -- a customer's phone shows the raw encoded
+// URL as a scan preview before they even tap it, so a redirect through
+// this route still isn't good enough for freshly printed labels. This
+// route survives only as a safety net for any already-printed label
+// still carrying the old Skrybix-URL QR: it records the scan, then
+// redirects here too, so an old label doesn't show any internal app UI.
 export default async function PublicCuttingPage({ params }: { params: { cuttingId: string } }) {
   const supabase = getSupabaseServerClient();
   const { data: cuttingRaw } = await supabase
@@ -27,5 +23,5 @@ export default async function PublicCuttingPage({ params }: { params: { cuttingI
 
   await supabase.rpc("increment_cutting_scan_count", { p_cutting_id: params.cuttingId });
 
-  redirect(INSTAGRAM_URL);
+  redirect(CUTTING_INSTAGRAM_URL);
 }

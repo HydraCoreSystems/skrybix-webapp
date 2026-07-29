@@ -1,5 +1,5 @@
 import { getSupabaseServerClient } from "@/lib/supabase";
-import { publicCuttingUrl, qrDataUri } from "@/lib/qr";
+import { CUTTING_INSTAGRAM_URL, qrDataUri } from "@/lib/qr";
 import { clearCuttingPrintQueue } from "../actions";
 import PrintButton from "@/components/PrintButton";
 import LabelStartPicker from "@/components/LabelStartPicker";
@@ -20,14 +20,15 @@ export default async function CuttingLabelsPage({
   const { data: rowsRaw } = await supabase.from("cuttings").select("*").eq("print_label", true);
   const rows = (rowsRaw ?? []) as Cutting[];
 
-  const items = await Promise.all(
-    rows.map(async (r) => ({
-      id: r.cutting_id,
-      line1: r.label_line1,
-      line2: r.label_line2,
-      qr: await qrDataUri(publicCuttingUrl(r.cutting_id)),
-    }))
-  );
+  // Every cutting label's QR encodes the same Instagram profile URL
+  // directly (see lib/qr.ts) -- generate it once rather than per row.
+  const instagramQr = await qrDataUri(CUTTING_INSTAGRAM_URL);
+  const items = rows.map((r) => ({
+    id: r.cutting_id,
+    line1: r.label_line1,
+    line2: r.label_line2,
+    qr: instagramQr,
+  }));
 
   return (
     <div className="card">

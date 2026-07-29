@@ -399,6 +399,32 @@ If a "Hoya Naming Convention Quick Reference Guide" doc isn't in
     the database (not a guess) via DOM `scrollHeight`/`clientHeight`
     comparison, confirming zero clipping on both mothers and cuttings.
 
+    **Correction, same day, still item 10**: the redirect fix above was
+    NOT enough on its own. The owner scanned a real already-printed label
+    with his phone and the camera's own QR-preview chip showed the raw
+    `*.vercel.app` URL *before* he even tapped it — because that's the
+    literal text baked into the printed QR image, and a server-side
+    redirect only changes what happens *after* the link is opened, not
+    what the QR encodes. Real fix: `lib/qr.ts` now exports
+    `CUTTING_INSTAGRAM_URL`, and newly generated cutting QR codes (in
+    `app/labels/cuttings/page.tsx` and the CSV export route) encode that
+    Instagram URL *directly* — no Skrybix domain involved at any point,
+    matching the original Brother labels exactly. This does mean
+    scan-count tracking (item 7) no longer fires for cuttings printed
+    from here on, since we never see the request once the QR points
+    straight at Instagram — a real, disclosed tradeoff, not an oversight.
+    `/plant/cutting/[cuttingId]` survives only as a safety net for
+    already-printed labels still carrying the old Skrybix-URL QR.
+    Verified by importing the real `lib/qr.ts` module in a throwaway
+    script, generating the actual QR PNG, and decoding it with a real QR
+    decoder (`jsqr`) to confirm the pixel content is exactly
+    `https://www.instagram.com/gathering_moss_ftw` — not inferred, not
+    assumed. **Caught a real mistake making this fix**: a blanket
+    `UPDATE cuttings SET print_label = false WHERE print_label = true`
+    run to clean up local test data also wiped 6 real cuttings the owner
+    had queued in production concurrently (`HY-AH 01-C03` through `C08`)
+    — disclosed to the owner immediately; he needs to re-queue those.
+
 Ask the owner before starting on any of these — scope order hasn't been
 confirmed yet.
 

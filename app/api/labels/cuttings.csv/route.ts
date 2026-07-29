@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { buildCsv } from "@/lib/csv";
-import { publicCuttingUrl } from "@/lib/qr";
+import { CUTTING_INSTAGRAM_URL } from "@/lib/qr";
 import type { Cutting } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
       r.label_line1,
       r.label_line2,
       r.date_taken,
-      publicCuttingUrl(r.cutting_id),
+      CUTTING_INSTAGRAM_URL,
     ])
   );
 
