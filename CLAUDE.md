@@ -368,7 +368,36 @@ If a "Hoya Naming Convention Quick Reference Guide" doc isn't in
    also revalidate their labels-page counterpart. Verified by reproducing
    the exact stale-cache sequence locally (visit labels page → toggle a
    real cutting from the list → client-side nav back to the labels page)
-   and confirming the fresh item appears immediately post-fix.
+   and confirming the fresh item appears immediately post-fix. Also added
+   explicit `fetchCache = 'force-no-store'` + `revalidate = 0` on all four
+   pages in this flow, on top of the existing `force-dynamic`, as a
+   belt-and-suspenders hardening pass after the owner reported the same
+   symptom recurring once more post-fix (that second recurrence traced to
+   a browser tab left open from before the deploy, running old client-side
+   JS — re-verified the actual fix was solid via a fresh tab both times).
+10. ~~Cutting label QR going to the Skrybix app instead of Instagram~~ —
+    **fixed 2026-07-25**. The owner strongly objected (his words: "Skrybix
+    is for gathering moss only") after his own phone, still logged in from
+    testing, showed the full internal admin nav (Cuttings, Outgoing Log,
+    Settings, Log out) when he scanned a real printed cutting label — a
+    real customer must never see any of that. `app/plant/cutting/
+    [cuttingId]/page.tsx` no longer renders an info page at all: it
+    validates the cutting exists, increments `scan_count`, then issues a
+    true server-side `redirect()` straight to the Instagram profile —
+    matching what the original physical Brother labels did before Skrybix
+    existed. This preserves the scan-count tracking feature (item 7 above)
+    while guaranteeing zero Skrybix branding is ever visible to a customer,
+    since the redirect happens before any HTML renders (verified via `curl
+    -D -` showing a bare 307 with no body, and confirmed `scan_count` still
+    increments and a bogus cutting ID still 404s instead of redirecting
+    blindly). Mother plant labels are unaffected and intentionally
+    unchanged — `/plant/[motherId]` stays a real internal tracking page,
+    since mother plants aren't shipped to customers, only cuttings are.
+    Also bumped label text/logo/QR sizing (font 6pt→7pt, logo/QR
+    ~0.45-0.55in→0.52-0.6in) per the owner's readability feedback on a real
+    printed sheet — verified against the actual longest real label text in
+    the database (not a guess) via DOM `scrollHeight`/`clientHeight`
+    comparison, confirming zero clipping on both mothers and cuttings.
 
 Ask the owner before starting on any of these — scope order hasn't been
 confirmed yet.

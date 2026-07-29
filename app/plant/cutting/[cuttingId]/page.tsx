@@ -1,6 +1,5 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getSupabaseServerClient } from "@/lib/supabase";
-import type { Cutting } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -10,38 +9,23 @@ export const dynamic = "force-dynamic";
 const INSTAGRAM_HANDLE = "gathering_moss_ftw";
 const INSTAGRAM_URL = `https://www.instagram.com/${INSTAGRAM_HANDLE}`;
 
+// A cutting label ships out with the plant to a real customer -- they
+// must never see any part of the internal Skrybix app (nav, branding,
+// inventory data), only the business's actual public presence. This
+// page exists purely to record a scan (scan_count) and then redirect
+// straight to Instagram before anything renders, matching what the
+// original physical Brother labels did (QR -> Instagram directly).
 export default async function PublicCuttingPage({ params }: { params: { cuttingId: string } }) {
   const supabase = getSupabaseServerClient();
   const { data: cuttingRaw } = await supabase
     .from("cuttings")
-    .select("*")
+    .select("cutting_id")
     .eq("cutting_id", params.cuttingId)
     .maybeSingle();
 
-  const cutting = cuttingRaw as Cutting | null;
-  if (!cutting) notFound();
+  if (!cuttingRaw) notFound();
 
   await supabase.rpc("increment_cutting_scan_count", { p_cutting_id: params.cuttingId });
 
-  return (
-    <div className="card">
-      <h3 style={{ marginTop: 0 }}>{cutting.cutting_id}</h3>
-      <p>
-        <em>{cutting.label_line1}</em>
-        {cutting.label_line2 ? ` — ${cutting.label_line2}` : ""}
-      </p>
-      <p>Full name: {cutting.full_display_name}</p>
-      <p>Date taken: {cutting.date_taken}</p>
-      <p>Status: {cutting.archived_at ? "Sold" : cutting.sold ? "Marked sold" : "Active"}</p>
-
-      <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
-        <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 8 }}>
-          Thanks for taking home a Gathering Moss plant!
-        </p>
-        <a className="btn" href={INSTAGRAM_URL} target="_blank" rel="noopener noreferrer">
-          Follow @{INSTAGRAM_HANDLE} on Instagram
-        </a>
-      </div>
-    </div>
-  );
+  redirect(INSTAGRAM_URL);
 }

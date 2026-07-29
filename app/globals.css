@@ -201,18 +201,18 @@ label {
   width: var(--label-width);
   height: var(--label-height);
   box-sizing: border-box;
-  padding: 0.04in;
+  padding: 0.035in;
   display: flex;
   align-items: center;
-  gap: 0.05in;
+  gap: 0.04in;
   overflow: hidden;
-  font-size: 6pt;
-  line-height: 1.15;
+  font-size: 7pt;
+  line-height: 1.12;
 }
 
 .label-cell img.qr {
-  width: 0.55in;
-  height: 0.55in;
+  width: 0.6in;
+  height: 0.6in;
   flex-shrink: 0;
 }
 
@@ -220,15 +220,15 @@ label {
    physical Brother tape design (GM_Mother_Label_18mm.lbx has none,
    GM_Cutting_Label_18mm.lbx does). QR shrinks slightly to make room. */
 .label-cell img.logo {
-  width: 0.45in;
-  height: 0.45in;
+  width: 0.52in;
+  height: 0.52in;
   flex-shrink: 0;
   object-fit: contain;
 }
 
 .label-cell.cutting img.qr {
-  width: 0.48in;
-  height: 0.48in;
+  width: 0.52in;
+  height: 0.52in;
 }
 
 .label-cell .text {
@@ -240,7 +240,7 @@ label {
 
 .label-cell .id {
   font-weight: 700;
-  font-size: 6.5pt;
+  font-size: 7.5pt;
 }
 
 /* On-screen only: faint outline so the sheet's real proportions are
