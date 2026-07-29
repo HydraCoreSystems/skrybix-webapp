@@ -6,6 +6,8 @@ import type { Cutting } from "@/lib/types";
 type CuttingRow = Cutting & { mother_plants: { display_name: string } | null };
 
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
 
 export default async function CuttingsPage({
   searchParams,
