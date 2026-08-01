@@ -2,7 +2,16 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import {
+  selectCommerceRecord,
+  type CommerceSelectionRepository,
+  type CommerceSelectionSource,
+} from "@/lib/commerce-export";
 import { getSupabaseServerClient } from "@/lib/supabase";
+
+export type CommerceSelectionActionResult =
+  | { ok: true; state: "selected" | "acknowledged"; alreadySelected: boolean }
+  | { ok: false; message: string };
 
 export async function createCuttings(formData: FormData) {
   const motherId = String(formData.get("mother_id") || "").trim();
@@ -75,6 +84,55 @@ export async function toggleCuttingField(cuttingId: string, field: "sold" | "pri
   if (field === "print_label") {
     revalidatePath("/labels/cuttings");
   }
+}
+
+export async function selectCuttingForCommerce(cuttingId: string): Promise<CommerceSelectionActionResult> {
+  const normalizedCuttingId = cuttingId.trim();
+  if (!normalizedCuttingId) {
+    return { ok: false, message: "A cutting ID is required." };
+  }
+
+  const supabase = getSupabaseServerClient();
+  const repository: CommerceSelectionRepository = {
+    async claimUnselected(id, selectedAt) {
+      const { data, error } = await supabase
+        .from("cuttings")
+        .update({ commerce_selected_at: selectedAt })
+        .eq("cutting_id", id)
+        .is("commerce_selected_at", null)
+        .select("cutting_id,commerce_selected_at,commerce_acknowledged_at")
+        .maybeSingle();
+
+      return {
+        record: (data as CommerceSelectionSource | null) ?? null,
+        error: error?.message ?? null,
+      };
+    },
+    async findById(id) {
+      const { data, error } = await supabase
+        .from("cuttings")
+        .select("cutting_id,commerce_selected_at,commerce_acknowledged_at")
+        .eq("cutting_id", id)
+        .maybeSingle();
+
+      return {
+        record: (data as CommerceSelectionSource | null) ?? null,
+        error: error?.message ?? null,
+      };
+    },
+  };
+
+  const result = await selectCommerceRecord(repository, normalizedCuttingId, new Date().toISOString());
+  if (!result.record) {
+    return { ok: false, message: result.error ?? "Could not select cutting for GM Commerce." };
+  }
+
+  revalidatePath("/cuttings");
+  return {
+    ok: true,
+    state: result.record.commerce_acknowledged_at ? "acknowledged" : "selected",
+    alreadySelected: result.alreadySelected,
+  };
 }
 
 export async function pushSoldToOutgoingLog() {

@@ -90,10 +90,20 @@ create table if not exists cuttings (
   print_label        boolean not null default false,
   archived_at        timestamptz,
   created_at         timestamptz not null default now(),
-  scan_count         int not null default 0
+  scan_count         int not null default 0,
+  commerce_selected_at    timestamptz,
+  commerce_acknowledged_at timestamptz
 );
 
+-- These ALTER statements make the selection handoff safe to apply to the
+-- production table that existed before these columns were introduced.
+alter table cuttings add column if not exists commerce_selected_at timestamptz;
+alter table cuttings add column if not exists commerce_acknowledged_at timestamptz;
+
 create index if not exists cuttings_active_idx on cuttings (mother_id) where archived_at is null;
+create index if not exists cuttings_commerce_selected_idx
+  on cuttings (cutting_id)
+  where commerce_selected_at is not null and commerce_acknowledged_at is null;
 
 -- QR-scan tracking: a page load on a public /plant/** page is a very
 -- reliable stand-in for "someone scanned this" since those URLs aren't

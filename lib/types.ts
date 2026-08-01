@@ -37,6 +37,8 @@ export type Cutting = {
   archived_at: string | null;
   created_at: string;
   scan_count: number;
+  commerce_selected_at: string | null;
+  commerce_acknowledged_at: string | null;
 };
 
 export type OutgoingLogEntry = {

@@ -3,55 +3,78 @@
 Skrybix is Gathering Moss's plant inventory and label-printing application.
 It remains the authority for mother-plant and cutting identities.
 
-## GM Commerce export
+## GM Commerce handoff
 
-`GET /api/commerce/v1/plants` returns a versioned, read-only JSON snapshot
-of every cutting, including archived records so a downstream importer can
-reconcile lifecycle state without treating an omitted record as deleted.
+Skrybix remains the source of truth for cutting identity. In **Cuttings**, a
+human checks **Select for GM Commerce** beside an existing cutting. This
+persists `commerce_selected_at` on that original source record; it does not
+create, modify, or manually re-enter a SKU.
 
-As of 2026-08-01, the current `origin/master` branch has no
-`app/api/sku-registry/route.ts` endpoint and no `SKU_REGISTRY_KEY` or
-`x-registry-key` configuration. This route is therefore the narrow,
-source-owned Skrybix export for GM Commerce; it is not a replacement for an
-existing Skrybix registry endpoint.
+The existing Skrybix `cutting_id` is the only durable SKU-like identifier
+available for every cutting, so the handoff returns that unchanged value as
+both `sourceRecordId` and `sku`. Skrybix has no separate commerce-SKU field
+and does not generate one for this integration.
 
-The route is protected by Skrybix's existing session middleware. Sign in to
-Skrybix first, then request the endpoint with that authenticated browser
-session (or its `skrybix_session` cookie). It has no separate API key and
-performs no writes. Unauthenticated requests follow the normal redirect to
-`/login`.
+### Access and setup
+
+Apply the updated `supabase/schema.sql` to add the durable selection and
+acknowledgement columns. Set a non-empty `COMMERCE_EXPORT_KEY` in the
+Skrybix deployment environment, using a unique random value such as:
+
+```sh
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+Do not commit the key. GM Commerce sends it on every request:
+
+```http
+Authorization: Bearer <COMMERCE_EXPORT_KEY>
+```
+
+The API route is intentionally excluded from Skrybix's browser-session
+middleware so GM Commerce can use this bearer credential. The route itself
+fails closed with `401` unless the configured token exactly matches; it does
+not provide Supabase access, browser-session access, or source-record write
+access to GM Commerce other than the documented acknowledgement timestamp.
+
+| Operation | Endpoint | Result |
+| --- | --- | --- |
+| Read pending selections | `GET /api/commerce/v1/plants` | Returns only human-selected, unacknowledged cutting records. |
+| Acknowledge an imported record | `POST /api/commerce/v1/plants/:cuttingId/acknowledge` | Durably marks that selected source record acknowledged. Repeating it is safe. |
 
 ```json
 {
-  "export_version": "1.0",
-  "source_system": "skrybix",
-  "generated_at": "2026-08-01T00:00:00.000Z",
+  "exportVersion": "1.0",
+  "sourceSystem": "skrybix",
+  "retrievedAt": "2026-08-01T00:00:00.000Z",
   "records": [
     {
-      "source_system": "skrybix",
-      "source_record_id": "HY-ABC01-C01",
-      "plant_identity": "HY-ABC01-C01",
-      "plant_record_type": "cutting",
-      "display_name": "Hoya example",
-      "parent_source_record_id": "HY-ABC01",
-      "is_active": true,
-      "is_sold": false,
-      "archived_at": null,
-      "source_created_at": "2026-08-01T00:00:00.000Z"
+      "sourceSystem": "skrybix",
+      "sourceRecordId": "HY-ABC01-C01",
+      "sku": "HY-ABC01-C01",
+      "displayName": "Hoya example",
+      "parentSourceRecordId": "HY-ABC01",
+      "plantRecordType": "cutting",
+      "state": "active",
+      "selectionState": "selected",
+      "selectedAt": "2026-08-01T00:00:00.000Z",
+      "acknowledgedAt": null,
+      "archivedAt": null,
+      "sourceCreatedAt": "2026-08-01T00:00:00.000Z"
     }
   ]
 }
 ```
 
-`plant_identity` is the existing, permanent Skrybix `cutting_id`; it is
-deliberately not labelled as a commerce SKU. Skrybix has no separate
-commerce-SKU field. `is_active` means only that `archived_at` is null, not
-that a cutting has been approved or listed for sale. Likewise, `is_sold`
-reports Skrybix's existing sold flag and is not a marketplace inventory
-quantity.
+`state` truthfully reports the current source lifecycle: `active`, `sold`, or
+`archived`. It is not marketplace availability or inventory quantity.
+`displayName` is the stored source display name, not a generated listing
+title. The source has no cutting `updated_at`, listing-readiness field,
+price, quantity, photo folder, or marketplace data, so none is inferred.
 
-The current schema has no source `updated_at` field for cuttings, no
-commerce SKU, no listing-readiness field, and no reliable sale-availability
-field. Those facts are intentionally absent from this export rather than
-inferred. GM Commerce may retain the source identity and own later commerce
-workflow state, but must not write that state back through this endpoint.
+GM Commerce must import idempotently on `sourceSystem` plus `sourceRecordId`,
+then call the acknowledgement route after its own durable intake succeeds.
+An acknowledged cutting remains visibly acknowledged in Skrybix but is no
+longer returned by the pending-selection response. There is no callback,
+two-way synchronization, or GM Commerce write access beyond that narrow
+acknowledgement timestamp; GM Commerce owns all downstream commerce state.
