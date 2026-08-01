@@ -9,6 +9,12 @@ It remains the authority for mother-plant and cutting identities.
 of every cutting, including archived records so a downstream importer can
 reconcile lifecycle state without treating an omitted record as deleted.
 
+As of 2026-08-01, the current `origin/master` branch has no
+`app/api/sku-registry/route.ts` endpoint and no `SKU_REGISTRY_KEY` or
+`x-registry-key` configuration. This route is therefore the narrow,
+source-owned Skrybix export for GM Commerce; it is not a replacement for an
+existing Skrybix registry endpoint.
+
 The route is protected by Skrybix's existing session middleware. Sign in to
 Skrybix first, then request the endpoint with that authenticated browser
 session (or its `skrybix_session` cookie). It has no separate API key and
