@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { CommerceSelectionControl } from "@/components/CommerceSelectionControl";
+import { getCommerceHandoffState } from "@/lib/commerce-export";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { toggleCuttingField, pushSoldToOutgoingLog } from "./actions";
 import type { Cutting } from "@/lib/types";
@@ -50,6 +52,7 @@ export default async function CuttingsPage({
             <th>Date Taken</th>
             <th>Sold?</th>
             <th>Print?</th>
+            <th>GM Commerce</th>
             <th>Scans</th>
           </tr>
         </thead>
@@ -74,6 +77,12 @@ export default async function CuttingsPage({
                     {c.print_label ? "Queued ✓" : "Queue for print"}
                   </button>
                 </form>
+              </td>
+              <td>
+                <CommerceSelectionControl
+                  cuttingId={c.cutting_id}
+                  initialState={getCommerceHandoffState(c)}
+                />
               </td>
               <td>{c.scan_count}</td>
             </tr>

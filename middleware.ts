@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session";
 
 // Server-enforced session gate. Runs before every request (Vercel Edge
-// Middleware) except /login and /plant, so it protects API routes and
+// Middleware) except public routes and the commerce handoff routes, which
+// verify their own bearer credential. It protects all other API routes and
 // server actions too, not just page navigation — a frontend-only lock
 // screen would be trivially bypassed by hitting a route directly. Fails
 // closed if AUTH_SECRET isn't configured, rather than silently letting
@@ -31,5 +32,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|login|plant|gm-logo.png).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|login|plant|gm-logo.png|api/commerce/v1/plants).*)"],
 };
