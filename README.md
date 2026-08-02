@@ -78,3 +78,5 @@ An acknowledged cutting remains visibly acknowledged in Skrybix but is no
 longer returned by the pending-selection response. There is no callback,
 two-way synchronization, or GM Commerce write access beyond that narrow
 acknowledgement timestamp; GM Commerce owns all downstream commerce state.
+
+GMCOM-003 commerce-selection handoff deployed.
