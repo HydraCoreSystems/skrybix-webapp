@@ -756,12 +756,13 @@ confirmed yet.
       whatever `sku` it receives verbatim. Coordinate the cutover so
       there's no mixed/ambiguous period where some selected records
       have the old (source-ID-as-SKU) behavior and some have the new
-      one. Before flipping this on in production, also run the legacy
-      rollout query (in the implementation report) to find any
-      currently-selected-but-unacknowledged records from before this
-      shipped and assign them real SKUs **and mother-facts rows**
-      deliberately — do not assume any specific record is "the only one"
-      without actually querying.
+      one. **Legacy rollout: resolved (2026-08-13)** — the owner ran the
+      real production legacy-inventory query; it found exactly one
+      already-selected/acknowledged record, `HY-LOB01-C04`, which turned
+      out to be test data (not a real sale) and was deleted from
+      production rather than backfilled. Re-running the query afterward
+      confirmed zero records remain needing a SKU or mother-facts
+      backfill. No pre-deployment backfill step is required.
 
 ## What NOT to do
 

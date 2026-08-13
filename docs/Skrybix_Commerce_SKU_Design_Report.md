@@ -1,7 +1,7 @@
 # Skrybix Commerce SKU Standardization — Design Report
 
-**Date:** 2026-08-13 (originally drafted); revised 2026-08-13 to fold in owner corrections and finalize as one authoritative document, per the PR #10 review comment; revised again same day to close the blocking findings from the PR #11 implementation review (see "Review response" at the end).
-**Status:** Final design, adopted with owner corrections, with the PR #11 review's blocking findings addressed. Schema, RPCs, UI, and tests below reflect what is actually implemented on branch `claude/commerce-sku-implementation` — **committed and pushed to that branch, open as a draft PR, not merged, not deployed, not production-enabled.** See "Implementation status" and "Review response" at the end for the precise state of each piece.
+**Date:** 2026-08-13 (originally drafted); revised 2026-08-13 to fold in owner corrections and finalize as one authoritative document, per the PR #10 review comment; revised again same day to close the blocking findings from the PR #11 implementation review (see "Review response" at the end); revised again same day once the real production legacy-inventory query confirmed zero backfill is needed (see "Legacy rollout").
+**Status:** Final design, adopted with owner corrections, with the PR #11 review's blocking findings addressed and the legacy-rollout data item resolved (zero records need backfill). Schema, RPCs, UI, and tests below reflect what is actually implemented on branch `claude/commerce-sku-implementation` — **committed and pushed to that branch, open as a draft PR, not merged, not deployed, not production-enabled.** No remaining blockers other than owner/reviewer sign-off to move this out of draft. See "Implementation status" and "Review response" at the end for the precise state of each piece.
 **Scope:** Answers the 12 requested points + the mother-plant content-semantics gap inventory + the material-conflict check, against the current `master` branch (post-PR #9). §5 and §12 below have been updated to match the final, owner-corrected schema — the original draft schema (`commerce_skus(source_record_id primary key)`) was superseded before implementation and is not shown here.
 
 ---
@@ -214,7 +214,7 @@ One clean property of the lazy-assignment design (§6/§7): since `GET /api/comm
 - `next_commerce_mother_seq`/`next_commerce_cutting_seq` concurrency: mirror the existing `commerce-export.test.ts` style — call concurrently, assert no duplicate sequence numbers issued (there's no existing SQL-level concurrency test for `next_mother_seq`/`next_cutting_seq` either, worth noting as a gap in the *current* test suite too, not just the new one).
 - SKU immutability: no code path updates `commerce_skus.sku` after insert (this can be a code-review/grep check like the ones in this report, or a real test asserting the function set never exposes an update path).
 - Selection-triggers-SKU-assignment integration test: selecting a mother/cutting for commerce that has no `commerce_skus` row yet results in exactly one being created, with a valid, correctly-sequenced SKU.
-- A record already selected before this ships (the `HY-ICE01-C01` case, §6) gets its SKU backfilled correctly by whatever one-time script/action handles that transition.
+- Confirmed against real production data (not the earlier guessed `HY-ICE01-C01` case) that no record already selected before this ships needs backfilling at all — see "Legacy rollout."
 
 **Migration**: purely additive — three new tables (`genus_codes`, `plant_codes`, `commerce_skus`) plus two counter tables, zero changes to any existing table, zero changes to `mother_id`/`cutting_id` generation. This is materially the same low-risk shape as every other Supabase migration already shipped this session (new tables/columns via `create table if not exists`/`alter table ... add column if not exists`).
 
@@ -227,7 +227,7 @@ These were open questions in the original draft. All five were decided by the ow
 1. **Plant-code uniqueness scope** (§4): **Resolved — per-genus** (`unique (genus_code, code)`), as originally recommended. Implemented as-is.
 2. **SKU-assignment trigger** (§7): **Resolved — at first commerce selection**, as originally recommended. Implemented in `select_mother_for_commerce()`/`select_cutting_for_commerce()`.
 3. **Genus codes for genera beyond Hoya/Alocasia**: **Resolved — `HY` (Hoya) and `AL` (Alocasia) are the only approved codes for now.** Seeded via migration (`insert into genus_codes ... on conflict (code) do nothing`). Philodendron/Anthurium/Monstera/Dischidia remain unassigned; no genus code exists for them yet, and none will be invented speculatively — a future genus needs its own explicit owner-approved code before any record of that genus can receive a commerce SKU.
-4. **Already-selected legacy records** (§6): **Not assumed resolved.** The owner decision record was explicit that `HY-ICE01-C01` is not assumed to be the only one — the actual production inventory must come from a real query result, not a guess. The query is written and ready (see "Legacy rollout" below); running it against production and reporting the result back is the one remaining action item, tracked as a data request, not an owner decision.
+4. **Already-selected legacy records** (§6): **Resolved.** The real production query returned exactly one record (`HY-LOB01-C04`), which turned out to be test data, deleted by the owner rather than backfilled. Re-running the query afterward confirmed zero rows remain. See "Legacy rollout" below for the full account — the earlier assumption of `HY-ICE01-C01` being the record in question was wrong; querying instead of guessing is exactly why that was caught.
 5. **Mother-plant content semantics** (below): **Resolved — Skrybix captures these fields**, required at selection time (not optional, not inferred from `notes`). Implemented as `mother_commerce_facts`, populated only through `select_mother_for_commerce()`, collected in `CommerceSkuSelectionForm.tsx`'s mother-only fields.
 
 ---
@@ -291,22 +291,33 @@ A local Postgres 16 instance was actually stood up in this session and the full 
 
 The exact commands are captured in `supabase/commerce_sku_tests.sql` (committed on `claude/commerce-sku-implementation`, re-run against a second fresh database as a reproducibility check before this report was finalized — same results both times) and the JS-level pure-function tests are in `lib/commerce-export.test.ts` (6/6 passing: sourceRecordId≠sku, fail-closed on missing SKU, mixed mother/cutting export, genus/plant code validation).
 
-### Legacy rollout — the one thing I genuinely cannot do myself
+### Legacy rollout — RESOLVED (2026-08-13), no backfill needed
 
-I have no credentialed access to the production Supabase database in this session. Before this ships, run this in the Supabase SQL editor and get me (or whoever reviews next) the actual result — I am not guessing or assuming `HY-ICE01-C01` is the only one:
+The production legacy-inventory query was run by the owner against the real Skrybix Supabase database. Result: **exactly one record** needed backfill — `HY-LOB01-C04` (a cutting, mother `HY-LOB01`, selected 2026-08-02, already acknowledged by GM Commerce under the old `sku === sourceRecordId` behavior) — and **zero** `mother_id`/`cutting_id` cross-type collisions.
+
+The owner identified `HY-LOB01-C04` as test data that should never have been in production ("THIS IS NOT A REAL PLANT OR CUTTING... GET RID OF IT"), not a real sale needing a real SKU. It — and its matching `outgoing_log` row — were deleted from production (not archived; archiving would not have removed it from `GET /api/commerce/v1/plants`'s or the legacy-inventory query's un-archived-filtered selection, which is part of why it kept resurfacing). Re-running the legacy-inventory query afterward returned **zero rows** across every check.
+
+**Net result: no legacy backfill is required.** Every currently selected/acknowledged record in production either already has (impossible, since the migration hasn't shipped yet) or — the actual case — there simply are none anymore. The moment the migration and application code deploy, `GET /api/commerce/v1/plants` will have nothing to fail closed on, because there is nothing pending. This was the last open item blocking this PR from moving out of draft.
+
+The query actually run (a simplified pre-migration version of the one originally proposed here, since `commerce_skus`/`mother_commerce_facts` don't exist in production before this PR's migration applies, so checking against them at query time isn't meaningful yet):
 
 ```sql
-select 'cutting' as plant_record_type, cutting_id as source_record_id, commerce_selected_at
-from cuttings
-where commerce_selected_at is not null and commerce_acknowledged_at is null
+with selected_or_acknowledged as (
+  select 'cutting'::text as plant_record_type, c.cutting_id as source_record_id,
+         c.mother_id as parent_mother_id, c.commerce_selected_at, c.commerce_acknowledged_at
+  from cuttings c
+  where c.commerce_selected_at is not null
+  union all
+  select 'mother'::text, m.mother_id, null, m.commerce_selected_at, m.commerce_acknowledged_at
+  from mother_plants m
+  where m.commerce_selected_at is not null
+)
+select 'pending_legacy_backfill' as check_type, * from selected_or_acknowledged
 union all
-select 'mother', mother_id, commerce_selected_at
-from mother_plants
-where commerce_selected_at is not null and commerce_acknowledged_at is null
-order by commerce_selected_at;
+select 'id_collision', 'mother/cutting', m.mother_id, c.cutting_id, null, null
+from mother_plants m join cuttings c on c.cutting_id = m.mother_id
+order by check_type, commerce_selected_at;
 ```
-
-Every row this returns needs a deliberately-assigned SKU (via `select_mother_for_commerce()`/`select_cutting_for_commerce()`, choosing real genus/plant codes for each) **and, for any mother rows, real `mother_commerce_facts`** — as part of rollout, before the new `sku`/`motherFacts`-resolution behavior goes live — otherwise those specific already-selected records would hit the fail-closed path (no resolvable SKU or no recorded facts) the first time `GET /api/commerce/v1/plants` runs post-cutover.
 
 ### Explicitly not done in this pass
 
@@ -326,7 +337,7 @@ A formal blocking review (`pullrequestreview-4931939935` on PR #11) found eight 
 1. **Composite identity lost in both API paths.** Fixed. `GET /api/commerce/v1/plants`'s SKU map and `lookupSku()` in the acknowledge route are now both keyed/filtered on `(plant_record_type, source_record_id)`, not `source_record_id` alone — matching `commerce_skus`' real database identity. `mothers/page.tsx`/`cuttings/page.tsx`'s own SKU lookups got the same `plant_record_type` filter for consistency, even though a same-page query can't itself cross tables.
 2. **The cutting RPC trusted client-supplied lineage.** Fixed. `assign_commerce_sku_for_cutting()`/`select_cutting_for_commerce()` no longer accept a mother-ID parameter at all — the mother is derived from `cuttings.mother_id` inside the database, and the function raises if the cutting doesn't exist. `selectCuttingForCommerce()` (Server Action) and `CommerceSkuSelectionForm.tsx` had the now-unnecessary `motherId` parameter/prop removed entirely, not just left unused.
 3. **No forward migration.** Fixed. `supabase/migrations/20260813221000_commerce_sku_standardization.sql` is a new, real, timestamped migration containing exactly the additive delta this feature introduces (verbatim from `schema.sql`, which remains the fresh-database reference). Verified: applying it against a simulated pre-PR-#11 database produces a schema byte-identical (`pg_dump -s` diff, aside from a random per-dump restrict token) to applying the consolidated `schema.sql` fresh, and re-applying the migration a second time is a clean no-op.
-4. **Mother sale facts collected but never exported.** Fixed. `CommercePlantRecord` gained a `motherFacts` field (camelCased mirror of `mother_commerce_facts`) — always populated for a mother record, always `null` for a cutting. `normalizeMotherForCommerce()` fails closed (throws) if a selected mother has no recorded facts, the same rule already applied to a missing SKU. The legacy-rollout section above now also calls out that legacy mothers need facts backfilled, not only SKUs.
+4. **Mother sale facts collected but never exported.** Fixed. `CommercePlantRecord` gained a `motherFacts` field (camelCased mirror of `mother_commerce_facts`) — always populated for a mother record, always `null` for a cutting. `normalizeMotherForCommerce()` fails closed (throws) if a selected mother has no recorded facts, the same rule already applied to a missing SKU. (The legacy-rollout concern this raised — that a legacy mother might need facts backfilled — turned out moot: the real production query found zero legacy records of any kind needing backfill; see "Legacy rollout" above.)
 5. **SKU immutability incomplete (UPDATE only).** Fixed. `forbid_commerce_sku_update()` was renamed `forbid_commerce_sku_mutation()` and is now wired to a `BEFORE DELETE` trigger as well as `BEFORE UPDATE`. `commerce_sku_tests.sql` now attempts and confirms rejection of a real `DELETE` against an assigned row, not only an `UPDATE`.
 6. **RLS/grants and `search_path`.** Partially addressed, with a documented disagreement rather than blind compliance: every new `plpgsql` function now pins `set search_path = public, pg_temp`, closing the real, generic Postgres search-path-hijack risk. RLS itself was **not** added — this app has zero RLS anywhere in `schema.sql` today, and every table (old and new) is accessed exclusively through the Supabase **service role key** (`lib/supabase.ts`), which bypasses RLS unconditionally. Adding RLS policies to only the new tables would be inert against this app's actual access pattern while implying a security boundary nothing else in the codebase has — see the decision record added to `CLAUDE.md` for the full reasoning. Flagging this explicitly rather than silently skipping it or silently complying with something that wouldn't actually do anything.
 7. **Swallowed Supabase errors rendering as empty data.** Fixed. `getCommerceCodeOptions()` and the per-page SKU-lookup queries in `mothers/page.tsx`/`cuttings/page.tsx` now throw on a real query error instead of defaulting to `[]`/an empty map.
