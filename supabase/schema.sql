@@ -51,8 +51,27 @@ create table if not exists mother_plants (
   species_key      text,
   species_key_2    text,
   flower_photo_link text,
-  scan_count       int not null default 0
+  scan_count       int not null default 0,
+  -- Added 2026-08-13 so a whole mother plant (not just its cuttings) can
+  -- be listed for sale through the GM Commerce handoff below -- mirrors
+  -- cuttings.sold/commerce_selected_at/commerce_acknowledged_at. No
+  -- archived_at here: there's no archive concept for a mother plant in
+  -- this schema (only real deletion), so commerce records for mothers
+  -- always report state as "active" or "sold", never "archived".
+  sold                      boolean not null default false,
+  commerce_selected_at      timestamptz,
+  commerce_acknowledged_at  timestamptz
 );
+
+-- Safe to apply to the production table that existed before these
+-- columns were introduced.
+alter table mother_plants add column if not exists sold boolean not null default false;
+alter table mother_plants add column if not exists commerce_selected_at timestamptz;
+alter table mother_plants add column if not exists commerce_acknowledged_at timestamptz;
+
+create index if not exists mother_plants_commerce_selected_idx
+  on mother_plants (mother_id)
+  where commerce_selected_at is not null and commerce_acknowledged_at is null;
 
 -- Persistent, never-reused Mother_ID sequence counter, one row per
 -- 3-letter code (`spec3`). Mirrors the real live-sheet convention

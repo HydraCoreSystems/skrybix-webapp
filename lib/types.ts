@@ -23,6 +23,9 @@ export type MotherPlant = {
   species_key_2: string | null;
   flower_photo_link: string | null;
   scan_count: number;
+  sold: boolean;
+  commerce_selected_at: string | null;
+  commerce_acknowledged_at: string | null;
 };
 
 export type Cutting = {

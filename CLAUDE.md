@@ -574,6 +574,60 @@ confirmed yet.
     default applies there without asking — this was Skrybix-specific,
     from Skrybix's actual single-owner usage pattern.
 
+13. **2026-08-13: mother plants can now be listed for sale through GM
+    Commerce, not just cuttings.** The owner asked directly ("What would
+    happen if I wanted to list a mother plant for sale? I don't see a
+    way to do that at present") — confirmed real: the entire handoff
+    was hardcoded to cuttings only (`plantRecordType: "cutting"` was a
+    fixed literal, `mother_plants` had no `commerce_selected_at`/
+    `commerce_acknowledged_at`/`sold` columns, no selection checkbox on
+    the Mothers list). Owner explicitly chose "mirror the cutting flow"
+    over a narrower option when asked.
+
+    Generalized `lib/commerce-export.ts` rather than duplicating it:
+    `CommercePlantRecord.plantRecordType` is now `"cutting" | "mother"`,
+    `parentSourceRecordId` is nullable (`null` for a mother — it has no
+    parent in Skrybix's hierarchy), added `MotherCommerceSource` +
+    `normalizeMotherForCommerce()` mirroring the cutting versions, and
+    `createCommerceExport()` now takes both cuttings and mothers arrays
+    and merges them into one export. `mother_plants` gained
+    `sold`/`commerce_selected_at`/`commerce_acknowledged_at` columns
+    (same pattern as `cuttings`) — **no `archived_at`**, since mother
+    plants have no archive concept in this schema, only real deletion;
+    `MotherCommerceSource.archived_at` is always `null`, never read from
+    the DB (there's no column to read).
+
+    `GET /api/commerce/v1/plants` now queries both tables and merges.
+    `POST /api/commerce/v1/plants/:recordId/acknowledge` (renamed from
+    `:cuttingId` — same URL shape, `cuttingId` was just the wrong name
+    now) tries the `cuttings` table first, then `mother_plants`, since a
+    Cutting_ID and Mother_ID have no shared registry and the only
+    reliable way to know which table an id belongs to is to actually
+    look, not pattern-match the string.
+
+    `components/CommerceSelectionControl.tsx` takes `recordId`/`kind`
+    instead of `cuttingId` now, used identically from both the Cuttings
+    and Mothers list pages. `toggleMotherPrint` was replaced with a
+    generic `toggleMotherField(motherId, field, value)` (mirrors
+    `toggleCuttingField`) so the new `sold` toggle didn't need a second
+    near-duplicate function.
+
+    **This is a cross-system contract change** — `README.md`'s GM
+    Commerce handoff section was updated to match (mixed record types in
+    one list, nullable `parentSourceRecordId`/`archivedAt`, renamed
+    acknowledge param). If/when GM Commerce's own side gets touched,
+    make sure whoever's working on it has read the updated README, not
+    just the code — the shape of what it now receives changed.
+
+    **Deliberately NOT built**: pushing a sold mother plant to
+    `outgoing_log` the way `pushSoldToOutgoingLog()` does for cuttings.
+    The owner only asked about GM Commerce listing capability; selling a
+    whole mother plant is a different inventory event than selling a
+    cutting (the mother leaving the collection entirely vs. a routine
+    cutting sale), and folding it into the same disposal-log workflow
+    wasn't asked for. Revisit if/when the owner actually sells a mother
+    plant and wants that logged somewhere.
+
 ## What NOT to do
 
 - Do not replicate the Sheets/Apps Script architecture itself when

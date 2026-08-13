@@ -6,6 +6,12 @@ import { getSupabaseServerClient } from "@/lib/supabase";
 import { markSpeciesOwnedIfNeeded } from "@/lib/species-tracker";
 import { buildMotherId, deriveSpec3 } from "@/lib/mother-id";
 import { composeDisplayName } from "@/lib/hoya-naming";
+import {
+  selectCommerceRecord,
+  type CommerceSelectionActionResult,
+  type CommerceSelectionRepository,
+  type CommerceSelectionSource,
+} from "@/lib/commerce-export";
 
 function nullIfBlank(v: FormDataEntryValue | null): string | null {
   const s = String(v ?? "").trim();
@@ -91,9 +97,63 @@ export async function updateMother(motherId: string, formData: FormData) {
   redirect("/mothers?success=" + encodeURIComponent(`Mother plant "${motherId}" updated.`));
 }
 
-export async function toggleMotherPrint(motherId: string, value: boolean) {
+export async function toggleMotherField(motherId: string, field: "sold" | "print_label", value: boolean) {
   const supabase = getSupabaseServerClient();
-  await supabase.from("mother_plants").update({ print_label: value }).eq("mother_id", motherId);
+  await supabase
+    .from("mother_plants")
+    .update({ [field]: value })
+    .eq("mother_id", motherId);
   revalidatePath("/mothers");
-  revalidatePath("/labels/mothers");
+  if (field === "print_label") {
+    revalidatePath("/labels/mothers");
+  }
+}
+
+export async function selectMotherForCommerce(motherId: string): Promise<CommerceSelectionActionResult> {
+  const normalizedMotherId = motherId.trim();
+  if (!normalizedMotherId) {
+    return { ok: false, message: "A mother ID is required." };
+  }
+
+  const supabase = getSupabaseServerClient();
+  const repository: CommerceSelectionRepository = {
+    async claimUnselected(id, selectedAt) {
+      const { data, error } = await supabase
+        .from("mother_plants")
+        .update({ commerce_selected_at: selectedAt })
+        .eq("mother_id", id)
+        .is("commerce_selected_at", null)
+        .select("commerce_selected_at,commerce_acknowledged_at")
+        .maybeSingle();
+
+      return {
+        record: (data as CommerceSelectionSource | null) ?? null,
+        error: error?.message ?? null,
+      };
+    },
+    async findById(id) {
+      const { data, error } = await supabase
+        .from("mother_plants")
+        .select("commerce_selected_at,commerce_acknowledged_at")
+        .eq("mother_id", id)
+        .maybeSingle();
+
+      return {
+        record: (data as CommerceSelectionSource | null) ?? null,
+        error: error?.message ?? null,
+      };
+    },
+  };
+
+  const result = await selectCommerceRecord(repository, normalizedMotherId, new Date().toISOString());
+  if (!result.record) {
+    return { ok: false, message: result.error ?? "Could not select mother plant for GM Commerce." };
+  }
+
+  revalidatePath("/mothers");
+  return {
+    ok: true,
+    state: result.record.commerce_acknowledged_at ? "acknowledged" : "selected",
+    alreadySelected: result.alreadySelected,
+  };
 }

@@ -4,14 +4,11 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   selectCommerceRecord,
+  type CommerceSelectionActionResult,
   type CommerceSelectionRepository,
   type CommerceSelectionSource,
 } from "@/lib/commerce-export";
 import { getSupabaseServerClient } from "@/lib/supabase";
-
-export type CommerceSelectionActionResult =
-  | { ok: true; state: "selected" | "acknowledged"; alreadySelected: boolean }
-  | { ok: false; message: string };
 
 export async function createCuttings(formData: FormData) {
   const motherId = String(formData.get("mother_id") || "").trim();
