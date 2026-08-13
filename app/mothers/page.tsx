@@ -56,6 +56,7 @@ export default async function MothersPage({
             <th>Print?</th>
             <th>Scans</th>
             <th></th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -80,7 +81,9 @@ export default async function MothersPage({
               <td>
                 <Link className="btn small secondary" href={`/mothers/${encodeURIComponent(m.mother_id)}/edit`}>
                   Edit
-                </Link>{" "}
+                </Link>
+              </td>
+              <td>
                 <Link
                   className="btn small secondary"
                   href={`/plant/${encodeURIComponent(m.mother_id)}`}
