@@ -18,7 +18,10 @@ export default async function MothersPage({
   searchParams: { success?: string; error?: string; q?: string };
 }) {
   const supabase = getSupabaseServerClient();
-  const { data: rowsRaw } = await supabase.from("mother_plants").select("*").order("mother_id");
+  const { data: rowsRaw, error: rowsError } = await supabase.from("mother_plants").select("*").order("mother_id");
+  if (rowsError) {
+    throw new Error(`Unable to load mother plants: ${rowsError.message}`);
+  }
   const allRows = (rowsRaw ?? []) as MotherPlant[];
   const q = searchParams.q ?? "";
   const rows = allRows.filter((m) =>
@@ -34,10 +37,14 @@ export default async function MothersPage({
   const selectedIds = rows.filter((m) => m.commerce_selected_at).map((m) => m.mother_id);
   const skusByRecordId = new Map<string, string>();
   if (selectedIds.length > 0) {
-    const { data: skuRows } = await supabase
+    const { data: skuRows, error: skuError } = await supabase
       .from("commerce_skus")
       .select("source_record_id,sku")
+      .eq("plant_record_type", "mother")
       .in("source_record_id", selectedIds);
+    if (skuError) {
+      throw new Error(`Unable to load assigned commerce SKUs: ${skuError.message}`);
+    }
     for (const row of skuRows ?? []) {
       skusByRecordId.set(row.source_record_id as string, row.sku as string);
     }

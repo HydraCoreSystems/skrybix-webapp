@@ -86,19 +86,23 @@ export async function toggleCuttingField(cuttingId: string, field: "sold" | "pri
 // and marking the cutting selected either both commit or both roll back.
 // See docs/Skrybix_Commerce_SKU_Design_Report.md for why this can't be
 // safely orchestrated as separate round-trips from here.
+//
+// There is deliberately no motherId parameter -- the RPC derives the
+// cutting's mother from cuttings.mother_id itself, in the database,
+// rather than trusting a value the browser sent. A caller here has no
+// way to make a cutting's commerce SKU get reserved under a mother it
+// doesn't actually belong to.
 export async function selectCuttingForCommerce(
   cuttingId: string,
-  motherId: string,
   genusCode: string,
   plantCode: string
 ): Promise<CommerceSelectionActionResult> {
   const normalizedCuttingId = cuttingId.trim();
-  const normalizedMotherId = motherId.trim();
   const normalizedGenus = genusCode.trim().toUpperCase();
   const normalizedPlant = plantCode.trim().toUpperCase();
 
-  if (!normalizedCuttingId || !normalizedMotherId) {
-    return { ok: false, message: "A cutting and its mother plant are required." };
+  if (!normalizedCuttingId) {
+    return { ok: false, message: "A cutting is required." };
   }
   const genusError = validateGenusCode(normalizedGenus);
   if (genusError) return { ok: false, message: genusError };
@@ -108,7 +112,6 @@ export async function selectCuttingForCommerce(
   const supabase = getSupabaseServerClient();
   const { data: sku, error } = await supabase.rpc("select_cutting_for_commerce", {
     p_cutting_id: normalizedCuttingId,
-    p_mother_id: normalizedMotherId,
     p_genus_code: normalizedGenus,
     p_plant_code: normalizedPlant,
   });

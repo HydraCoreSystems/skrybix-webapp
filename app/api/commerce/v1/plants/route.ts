@@ -4,8 +4,10 @@ import {
   isCommerceExportRequestAuthorized,
   CUTTING_COMMERCE_COLUMNS,
   MOTHER_COMMERCE_COLUMNS,
+  MOTHER_COMMERCE_FACTS_COLUMNS,
   type CuttingCommerceSource,
   type MotherCommerceSource,
+  type MotherCommerceFactsSource,
 } from "@/lib/commerce-export";
 import { getSupabaseServerClient } from "@/lib/supabase";
 
@@ -64,24 +66,50 @@ export async function GET(request: NextRequest) {
   // select_cutting_for_commerce() -- but this is not assumed silently:
   // createCommerceExport() below throws rather than exporting a record
   // with no resolvable SKU.
+  //
+  // Keyed by `${plant_record_type}:${source_record_id}`, not
+  // source_record_id alone -- see the comment on createCommerceExport()
+  // for why a bare source_record_id key is not safe here.
   const recordIds = [...(cuttings ?? []).map((c) => c.cutting_id), ...mothers.map((m) => m.mother_id)];
   const skusByRecordId = new Map<string, string>();
   if (recordIds.length > 0) {
     const { data: skuRows, error: skusError } = await supabase
       .from("commerce_skus")
-      .select("source_record_id,sku")
+      .select("plant_record_type,source_record_id,sku")
       .in("source_record_id", recordIds);
 
     if (skusError) {
       throw new Error(`Unable to resolve Skrybix commerce SKUs: ${skusError.message}`);
     }
     for (const row of skuRows ?? []) {
-      skusByRecordId.set(row.source_record_id as string, row.sku as string);
+      skusByRecordId.set(`${row.plant_record_type}:${row.source_record_id}`, row.sku as string);
+    }
+  }
+
+  const motherIds = mothers.map((m) => m.mother_id);
+  const motherFactsByRecordId = new Map<string, MotherCommerceFactsSource>();
+  if (motherIds.length > 0) {
+    const { data: factRows, error: factsError } = await supabase
+      .from("mother_commerce_facts")
+      .select(MOTHER_COMMERCE_FACTS_COLUMNS)
+      .in("source_record_id", motherIds);
+
+    if (factsError) {
+      throw new Error(`Unable to resolve Skrybix mother commerce facts: ${factsError.message}`);
+    }
+    for (const row of factRows ?? []) {
+      motherFactsByRecordId.set(row.source_record_id as string, row as MotherCommerceFactsSource);
     }
   }
 
   return NextResponse.json(
-    createCommerceExport((cuttings ?? []) as CuttingCommerceSource[], mothers, skusByRecordId, new Date().toISOString()),
+    createCommerceExport(
+      (cuttings ?? []) as CuttingCommerceSource[],
+      mothers,
+      skusByRecordId,
+      motherFactsByRecordId,
+      new Date().toISOString()
+    ),
     {
       headers: {
         "Cache-Control": "no-store",

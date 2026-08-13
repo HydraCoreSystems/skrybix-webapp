@@ -34,6 +34,46 @@ export const CUTTING_COMMERCE_COLUMNS =
 export const MOTHER_COMMERCE_COLUMNS =
   "mother_id,display_name,sold,created_at,commerce_selected_at,commerce_acknowledged_at";
 
+// Camel-cased mirror of mother_commerce_facts (supabase/schema.sql) --
+// present (never null) on every exported mother record, always null on
+// cutting records. Required so GM Commerce can produce the
+// intentionally different established-mother sale copy, instead of only
+// ever seeing the same cutting-shaped fields.
+export type MotherCommerceFacts = {
+  photoSubject: "exact_plant" | "representative_plant";
+  potSize: string;
+  plantSize: string;
+  rootedEstablished: boolean;
+  shippingPresentation: "ships_in_pot" | "prepared_other";
+  shippingPresentationDetail: string | null;
+  conditionNotes: string | null;
+};
+
+export type MotherCommerceFactsSource = {
+  photo_subject: "exact_plant" | "representative_plant";
+  pot_size: string;
+  plant_size: string;
+  rooted_established: boolean;
+  shipping_presentation: "ships_in_pot" | "prepared_other";
+  shipping_presentation_detail: string | null;
+  condition_notes: string | null;
+};
+
+export const MOTHER_COMMERCE_FACTS_COLUMNS =
+  "source_record_id,photo_subject,pot_size,plant_size,rooted_established,shipping_presentation,shipping_presentation_detail,condition_notes";
+
+function toMotherCommerceFacts(source: MotherCommerceFactsSource): MotherCommerceFacts {
+  return {
+    photoSubject: source.photo_subject,
+    potSize: source.pot_size,
+    plantSize: source.plant_size,
+    rootedEstablished: source.rooted_established,
+    shippingPresentation: source.shipping_presentation,
+    shippingPresentationDetail: source.shipping_presentation_detail,
+    conditionNotes: source.condition_notes,
+  };
+}
+
 export type CommercePlantRecord = {
   sourceSystem: "skrybix";
   sourceRecordId: string;
@@ -49,6 +89,10 @@ export type CommercePlantRecord = {
   acknowledgedAt: string | null;
   archivedAt: string | null;
   sourceCreatedAt: string;
+  // Always null for a cutting. Always a real object for a mother -- see
+  // normalizeMotherForCommerce, which fails closed (throws) rather than
+  // exporting a selected mother with no recorded facts.
+  motherFacts: MotherCommerceFacts | null;
 };
 
 // Selection/acknowledgement bookkeeping only -- deliberately has no id
@@ -123,10 +167,21 @@ export function normalizeCuttingForCommerce(cutting: CuttingCommerceSource, sku:
     acknowledgedAt: cutting.commerce_acknowledged_at,
     archivedAt: cutting.archived_at,
     sourceCreatedAt: cutting.created_at,
+    motherFacts: null,
   };
 }
 
-export function normalizeMotherForCommerce(mother: MotherCommerceSource, sku: string | null | undefined): CommercePlantRecord {
+// `facts` is looked up from mother_commerce_facts, keyed by mother_id --
+// same fail-closed rule as sku: a selected mother with no recorded facts
+// is refused, not exported with nulls (a legacy mother selected before
+// this table existed needs its facts backfilled during rollout, exactly
+// like the legacy SKU backfill -- see the design report's legacy
+// rollout section).
+export function normalizeMotherForCommerce(
+  mother: MotherCommerceSource,
+  sku: string | null | undefined,
+  facts: MotherCommerceFactsSource | null | undefined
+): CommercePlantRecord {
   const selectionState = getCommerceHandoffState(mother);
   if (selectionState === "unselected" || !mother.commerce_selected_at) {
     throw new Error(`Cannot export unselected mother plant ${mother.mother_id}.`);
@@ -135,6 +190,12 @@ export function normalizeMotherForCommerce(mother: MotherCommerceSource, sku: st
     throw new Error(
       `Selected mother ${mother.mother_id} has no assigned commerce SKU -- refusing to export ` +
         `rather than fall back to the source record ID as a placeholder SKU.`
+    );
+  }
+  if (!facts) {
+    throw new Error(
+      `Selected mother ${mother.mother_id} has no recorded commerce sale facts -- refusing to export ` +
+        `rather than send GM Commerce a record it cannot render correctly.`
     );
   }
 
@@ -151,13 +212,21 @@ export function normalizeMotherForCommerce(mother: MotherCommerceSource, sku: st
     acknowledgedAt: mother.commerce_acknowledged_at,
     archivedAt: mother.archived_at,
     sourceCreatedAt: mother.created_at,
+    motherFacts: toMotherCommerceFacts(facts),
   };
 }
 
+// skusByRecordId is keyed by `${plant_record_type}:${source_record_id}`,
+// not source_record_id alone -- mother_id and cutting_id are each only
+// unique within their own table (see the design report's collision-risk
+// section), so a bare source_record_id key could silently overwrite one
+// record's SKU with another's in the (currently theoretical, never
+// DB-enforced against each other) event of a cross-table ID collision.
 export function createCommerceExport(
   cuttings: CuttingCommerceSource[],
   mothers: MotherCommerceSource[],
   skusByRecordId: Map<string, string>,
+  motherFactsByRecordId: Map<string, MotherCommerceFactsSource>,
   retrievedAt: string
 ) {
   return {
@@ -167,10 +236,16 @@ export function createCommerceExport(
     records: [
       ...cuttings
         .filter((cutting) => getCommerceHandoffState(cutting) === "selected")
-        .map((cutting) => normalizeCuttingForCommerce(cutting, skusByRecordId.get(cutting.cutting_id))),
+        .map((cutting) => normalizeCuttingForCommerce(cutting, skusByRecordId.get(`cutting:${cutting.cutting_id}`))),
       ...mothers
         .filter((mother) => getCommerceHandoffState(mother) === "selected")
-        .map((mother) => normalizeMotherForCommerce(mother, skusByRecordId.get(mother.mother_id))),
+        .map((mother) =>
+          normalizeMotherForCommerce(
+            mother,
+            skusByRecordId.get(`mother:${mother.mother_id}`),
+            motherFactsByRecordId.get(mother.mother_id)
+          )
+        ),
     ],
   };
 }

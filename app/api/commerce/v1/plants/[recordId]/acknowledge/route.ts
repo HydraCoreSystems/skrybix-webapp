@@ -5,24 +5,51 @@ import {
   normalizeMotherForCommerce,
   CUTTING_COMMERCE_COLUMNS,
   MOTHER_COMMERCE_COLUMNS,
+  MOTHER_COMMERCE_FACTS_COLUMNS,
   type CuttingCommerceSource,
   type MotherCommerceSource,
+  type MotherCommerceFactsSource,
 } from "@/lib/commerce-export";
 import { getSupabaseServerClient, type SupabaseServerClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-async function lookupSku(supabase: SupabaseServerClient, recordId: string): Promise<string | null> {
+// plantRecordType is required, not inferred from the string shape of
+// recordId -- commerce_skus' real identity is the pair
+// (plant_record_type, source_record_id); filtering by source_record_id
+// alone risks matching the wrong row (or erroring on .maybeSingle()) in
+// the event of a cross-table ID collision.
+async function lookupSku(
+  supabase: SupabaseServerClient,
+  recordId: string,
+  plantRecordType: "cutting" | "mother"
+): Promise<string | null> {
   const { data, error } = await supabase
     .from("commerce_skus")
     .select("sku")
     .eq("source_record_id", recordId)
+    .eq("plant_record_type", plantRecordType)
     .maybeSingle();
   if (error) {
     throw new Error(`Unable to resolve Skrybix commerce SKU: ${error.message}`);
   }
   return (data?.sku as string | undefined) ?? null;
+}
+
+async function lookupMotherFacts(
+  supabase: SupabaseServerClient,
+  motherId: string
+): Promise<MotherCommerceFactsSource | null> {
+  const { data, error } = await supabase
+    .from("mother_commerce_facts")
+    .select(MOTHER_COMMERCE_FACTS_COLUMNS)
+    .eq("source_record_id", motherId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Unable to resolve Skrybix mother commerce facts: ${error.message}`);
+  }
+  return (data as MotherCommerceFactsSource | null) ?? null;
 }
 
 export async function POST(request: NextRequest, { params }: { params: { recordId: string } }) {
@@ -61,7 +88,7 @@ export async function POST(request: NextRequest, { params }: { params: { recordI
     throw new Error(`Unable to acknowledge Skrybix commerce record: ${cuttingError.message}`);
   }
   if (cuttingRow) {
-    const sku = await lookupSku(supabase, recordId);
+    const sku = await lookupSku(supabase, recordId, "cutting");
     return NextResponse.json(
       { record: normalizeCuttingForCommerce(cuttingRow as CuttingCommerceSource, sku), alreadyAcknowledged: false },
       { headers: { "Cache-Control": "no-store" } }
@@ -81,10 +108,11 @@ export async function POST(request: NextRequest, { params }: { params: { recordI
     throw new Error(`Unable to acknowledge Skrybix commerce record: ${motherError.message}`);
   }
   if (motherRow) {
-    const sku = await lookupSku(supabase, recordId);
+    const sku = await lookupSku(supabase, recordId, "mother");
+    const facts = await lookupMotherFacts(supabase, recordId);
     return NextResponse.json(
       {
-        record: normalizeMotherForCommerce({ ...motherRow, archived_at: null } as MotherCommerceSource, sku),
+        record: normalizeMotherForCommerce({ ...motherRow, archived_at: null } as MotherCommerceSource, sku, facts),
         alreadyAcknowledged: false,
       },
       { headers: { "Cache-Control": "no-store" } }
@@ -104,7 +132,7 @@ export async function POST(request: NextRequest, { params }: { params: { recordI
     throw new Error(`Unable to read Skrybix commerce record: ${existingCuttingError.message}`);
   }
   if (existingCutting) {
-    const sku = await lookupSku(supabase, recordId);
+    const sku = await lookupSku(supabase, recordId, "cutting");
     return describeAcknowledgeFailure(existingCutting as CuttingCommerceSource, sku, normalizeCuttingForCommerce);
   }
 
@@ -118,11 +146,12 @@ export async function POST(request: NextRequest, { params }: { params: { recordI
     throw new Error(`Unable to read Skrybix commerce record: ${existingMotherError.message}`);
   }
   if (existingMother) {
-    const sku = await lookupSku(supabase, recordId);
+    const sku = await lookupSku(supabase, recordId, "mother");
+    const facts = await lookupMotherFacts(supabase, recordId);
     return describeAcknowledgeFailure(
       { ...existingMother, archived_at: null } as MotherCommerceSource,
       sku,
-      normalizeMotherForCommerce
+      (row, s) => normalizeMotherForCommerce(row, s, facts)
     );
   }
 

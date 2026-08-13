@@ -1,226 +1,26 @@
--- Skrybix schema
+-- Forward migration for commerce SKU standardization.
 --
--- Ported from the live Google Sheet (Skrybix_FIXED_v2.gs / Mother_Plants /
--- Label_Data_Cuttings / Outgoing_Log / Hoya_Species / ID_Counters /
--- Archive_Cuttings), adapted to idiomatic Postgres rather than a literal
--- port of the Sheets architecture:
+-- This is the first file in supabase/migrations/ -- the repo's prior
+-- convention was a single consolidated supabase/schema.sql applied
+-- wholesale to a fresh database, with no forward-migration story for a
+-- database that already has data in it. That convention breaks down
+-- for this change specifically: it needs to run against the real,
+-- already-populated production database, not just a fresh one, so it
+-- gets a real timestamped migration file, matching the Supabase CLI's
+-- standard supabase/migrations/<timestamp>_<name>.sql layout. Every
+-- statement below is copied verbatim from supabase/schema.sql (which
+-- remains the consolidated reference for a fresh database) and is
+-- idempotent (create table if not exists / create or replace function),
+-- so running this migration and then re-applying schema.sql is safe
+-- either order, and running this migration twice is a no-op the second
+-- time.
 --
---   - ID_Counters -> mother_cutting_counters + next_cutting_seq(), an
---     atomic UPSERT instead of LockService + manual read/write. Same
---     guarantee (persistent, never-reused, collision-free per mother),
---     safer implementation.
---   - Archive_Cuttings -> cuttings.archived_at (soft-archive column)
---     instead of a second table + physical row move. Same guarantee
---     (archived rows drop out of "active" views, nothing is hard-deleted,
---     full row data preserved) via one WHERE clause instead of a copy+
---     delete.
---
--- Do not regenerate Cutting_ID/Mother_ID by scanning existing rows for a
--- max value — always go through next_cutting_seq(). See CLAUDE.md.
+-- Apply with the Supabase CLI (`supabase db push`) or by hand via
+-- `psql $DATABASE_URL -f supabase/migrations/20260813219000_commerce_sku_standardization.sql`.
+-- See docs/Skrybix_Commerce_SKU_Design_Report.md for the deployment
+-- order this fits into (schema first, then legacy-inventory SKU
+-- backfill, then application code).
 
--- Columns below mix two generations of the real sheet's naming model:
--- qualifier/collection_code/trade_name/hybrid are the v2 columns from
--- Skrybix_FIXED_v2.gs, but as of the 2026-07-23 data migration every real
--- row's naming data actually lives in the OLDER form_code/name_type/
--- cultivar/natural_cultivar columns instead -- the v2 columns exist on the
--- live sheet but are unused (blank on all 995 rows). Kept both rather than
--- guessing which will end up authoritative once the naming-automation UI
--- gets built (see CLAUDE.md "Not yet built").
-create table if not exists mother_plants (
-  mother_id        text primary key,
-  display_name     text not null,
-  location         text,
-  genus            text not null default 'Hoya',
-  species          text,
-  qualifier        text not null default '' check (qualifier in ('', 'aff.', 'cf.', 'sp.')),
-  collection_code  text,
-  cultivar         text,
-  trade_name       text,
-  hybrid           boolean not null default false,
-  botanical_line1  text,
-  botanical_line2  text,
-  print_label      boolean not null default false,
-  created_at       timestamptz not null default now(),
-  -- real columns found on the live Mother_Plants tab, not in Skrybix_FIXED_v2.gs
-  form_code        text,
-  name_type        text,
-  natural_cultivar boolean not null default false,
-  spec3            text,
-  mother_seq       text,
-  notes            text,
-  species_key      text,
-  species_key_2    text,
-  flower_photo_link text,
-  scan_count       int not null default 0,
-  -- Added 2026-08-13 so a whole mother plant (not just its cuttings) can
-  -- be listed for sale through the GM Commerce handoff below -- mirrors
-  -- cuttings.sold/commerce_selected_at/commerce_acknowledged_at. No
-  -- archived_at here: there's no archive concept for a mother plant in
-  -- this schema (only real deletion), so commerce records for mothers
-  -- always report state as "active" or "sold", never "archived".
-  sold                      boolean not null default false,
-  commerce_selected_at      timestamptz,
-  commerce_acknowledged_at  timestamptz
-);
-
--- Safe to apply to the production table that existed before these
--- columns were introduced.
-alter table mother_plants add column if not exists sold boolean not null default false;
-alter table mother_plants add column if not exists commerce_selected_at timestamptz;
-alter table mother_plants add column if not exists commerce_acknowledged_at timestamptz;
-
-create index if not exists mother_plants_commerce_selected_idx
-  on mother_plants (mother_id)
-  where commerce_selected_at is not null and commerce_acknowledged_at is null;
-
--- Persistent, never-reused Mother_ID sequence counter, one row per
--- 3-letter code (`spec3`). Mirrors the real live-sheet convention
--- (confirmed against actual production Mother_Plants rows, not guessed):
--- Mother_ID = "HY-" + spec3 + zero-padded 2-digit sequence, e.g.
--- "HY-ELL01" or, when the identifying text's 3rd character is a space,
--- "HY-AH 01". spec3 is the first 3 characters (uppercased, NOT trimmed)
--- of the species name when one is recorded, otherwise of the
--- cultivar/descriptor text -- see lib/mother-id.ts. Never regenerate by
--- scanning mother_plants for a max value; always go through
--- next_mother_seq(), same rule as next_cutting_seq() below.
-create table if not exists mother_id_counters (
-  spec3    text primary key,
-  next_seq int not null default 1
-);
-
--- Atomically reserves the next sequence number for a spec3 code.
-create or replace function next_mother_seq(p_spec3 text)
-returns int
-language plpgsql
-as $$
-declare
-  v_seq int;
-begin
-  insert into mother_id_counters (spec3, next_seq)
-  values (p_spec3, 2)
-  on conflict (spec3) do update
-    set next_seq = mother_id_counters.next_seq + 1
-  returning next_seq - 1 into v_seq;
-  return v_seq;
-end;
-$$;
-
--- Persistent, never-reused per-mother cutting sequence counter.
-create table if not exists mother_cutting_counters (
-  mother_id text primary key references mother_plants(mother_id),
-  next_seq  int not null default 1
-);
-
--- Atomically reserves `p_count` sequential numbers for a mother and
--- returns the first one, e.g. next_cutting_seq('M014', 3) issuing 5,6,7
--- returns 5. Safe under concurrent callers (single UPSERT, row-locked).
-create or replace function next_cutting_seq(p_mother_id text, p_count int)
-returns int
-language plpgsql
-as $$
-declare
-  v_start int;
-begin
-  insert into mother_cutting_counters (mother_id, next_seq)
-  values (p_mother_id, 1 + p_count)
-  on conflict (mother_id) do update
-    set next_seq = mother_cutting_counters.next_seq + p_count
-  returning next_seq - p_count into v_start;
-  return v_start;
-end;
-$$;
-
-create table if not exists cuttings (
-  cutting_id         text primary key,
-  mother_id          text not null references mother_plants(mother_id),
-  full_display_name  text,
-  label_line1        text,
-  label_line2        text,
-  date_taken         date,
-  sold               boolean not null default false,
-  print_label        boolean not null default false,
-  archived_at        timestamptz,
-  created_at         timestamptz not null default now(),
-  scan_count         int not null default 0,
-  commerce_selected_at    timestamptz,
-  commerce_acknowledged_at timestamptz
-);
-
--- These ALTER statements make the selection handoff safe to apply to the
--- production table that existed before these columns were introduced.
-alter table cuttings add column if not exists commerce_selected_at timestamptz;
-alter table cuttings add column if not exists commerce_acknowledged_at timestamptz;
-
-create index if not exists cuttings_active_idx on cuttings (mother_id) where archived_at is null;
-create index if not exists cuttings_commerce_selected_idx
-  on cuttings (cutting_id)
-  where commerce_selected_at is not null and commerce_acknowledged_at is null;
-
--- QR-scan tracking: a page load on a public /plant/** page is a very
--- reliable stand-in for "someone scanned this" since those URLs aren't
--- linked anywhere else or guessable -- not a literal scan-event log, just
--- a simple running total per the owner's request. Atomic UPDATE, not a
--- read-then-write, so concurrent scans can't clobber each other.
-create or replace function increment_mother_scan_count(p_mother_id text)
-returns void
-language sql
-as $$
-  update mother_plants set scan_count = scan_count + 1 where mother_id = p_mother_id;
-$$;
-
-create or replace function increment_cutting_scan_count(p_cutting_id text)
-returns void
-language sql
-as $$
-  update cuttings set scan_count = scan_count + 1 where cutting_id = p_cutting_id;
-$$;
-
-create table if not exists outgoing_log (
-  id                 bigint generated always as identity primary key,
-  date_out           date not null default current_date,
-  cutting_id         text not null references cuttings(cutting_id),
-  full_display_name  text,
-  qty                int not null default 1,
-  reason             text,
-  selling_platform   text,
-  notes              text,
-  created_at         timestamptz not null default now()
-);
-
--- Species reference/checklist (Kew POWO, 563 rows in the live Sheet).
--- Schema only for now — data import + naming-automation UI are separate,
--- not-yet-scoped decisions. In_Collection must never auto-unmark once
--- true (it's "have I ever owned this," not a live count) — enforce that
--- in application code, not here.
-create table if not exists hoya_species (
-  id               bigint generated always as identity primary key,
-  genus            text not null default 'Hoya',
-  species          text not null,
-  in_collection    boolean not null default false,
-  date_added       date,
-  preferred_id_code text,
-  native_range     text,
-  region_group     text,
-  growth_habit     text,
-  leaf_notes       text,
-  bloom_notes      text,
-  authority        text,
-  notes            text,
-  source           text,
-  unique_id        text
-);
-
-create unique index if not exists hoya_species_species_idx on hoya_species (lower(species));
-
--- Single shared site password, hashed (bcrypt), for the login page in
--- app/login. Singleton row (id always 1) -- this is a pragmatic first
--- step, not real multi-user accounts. See CLAUDE.md's auth section for
--- the eventual direction (individual sign-ons).
-create table if not exists site_auth (
-  id            int primary key default 1 check (id = 1),
-  password_hash text not null,
-  updated_at    timestamptz not null default now()
-);
 -- Commerce SKU standardization -- added 2026-08-13, owner-approved
 -- architecture (see docs/Skrybix_Commerce_SKU_Design_Report.md and the
 -- decision record in CLAUDE.md).
@@ -631,4 +431,3 @@ begin
   return v_sku;
 end;
 $$;
-

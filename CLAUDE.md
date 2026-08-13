@@ -669,8 +669,10 @@ confirmed yet.
       validation rolls back the SKU assignment that happened earlier in
       the same call, leaving zero rows behind).
     - Immutability is **database-enforced**, not just "no application
-      code updates it": a trigger rejects any `UPDATE` on `commerce_skus`
-      outright, and real foreign keys from `commerce_skus` to
+      code updates it": a trigger rejects any `UPDATE` **or `DELETE`** on
+      `commerce_skus` outright (a delete-then-reinsert would otherwise be
+      an easy way to silently "reassign" a SKU that already left this
+      system in an export), and real foreign keys from `commerce_skus` to
       `genus_codes`/`plant_codes` mean a registry code already used in
       an assigned SKU can't be renamed or deleted — Postgres refuses
       automatically, no extra trigger needed for that part. All of this
@@ -684,8 +686,30 @@ confirmed yet.
       to `sourceRecordId` by construction. `normalizeCuttingForCommerce`/
       `normalizeMotherForCommerce` (`lib/commerce-export.ts`) **fail
       closed** — throw rather than export a selected record with no
-      resolvable SKU — instead of ever falling back to `sourceRecordId`
-      as a placeholder SKU.
+      resolvable SKU (or, for a mother, no recorded sale facts) — instead
+      of ever falling back to `sourceRecordId` as a placeholder SKU or
+      exporting facts as null.
+    - `commerce_skus`' real identity is the **composite**
+      `(plant_record_type, source_record_id)`, not `source_record_id`
+      alone (mother_id and cutting_id are each only unique within their
+      own table). Every lookup — the GET export's SKU map, the
+      acknowledge route's `lookupSku()` — is keyed/filtered on both
+      fields, not just `source_record_id`, so a hypothetical cross-table
+      ID collision can never overwrite or mis-resolve the wrong record's
+      SKU.
+    - A cutting's mother is **always derived from `cuttings.mother_id`
+      inside the database** (`assign_commerce_sku_for_cutting()`,
+      `select_cutting_for_commerce()`), never trusted from a
+      caller-supplied parameter — the RPC/Server Action signatures do not
+      even accept a mother ID argument for cutting selection anymore.
+      Both `select_mother_for_commerce()`/`select_cutting_for_commerce()`
+      also verify the target record actually exists and that their
+      `UPDATE` genuinely marked it selected (or was already selected —
+      idempotent re-calls are fine), raising rather than returning a
+      SKU silently if neither is true. Re-selecting an already-assigned
+      record under a *different* genus/plant code is also rejected
+      outright (SKUs are immutable, so this can't be silently ignored or
+      silently reassigned).
     - **Required mother-sale facts**, collected at first mother
       selection, never inferred from `plantRecordType="mother"` and
       never read from the general `notes` field: sale-photo subject
@@ -695,11 +719,37 @@ confirmed yet.
       required detail when the latter). Optional but exportable:
       condition/recent-cutback notes. `mother_commerce_facts`
       (`supabase/schema.sql`) enforces the required ones as real
-      `NOT NULL`/`CHECK` columns, not just client-side validation.
-      Quantity is locked to `1` at the database level (a selected
-      mother record is always exactly one whole plant) — revisit only
-      if Phil later approves a different model. Cutting selection does
-      **not** collect these facts — cutting content stays as it was.
+      `NOT NULL`/`CHECK` columns (including the `prepared_other`-requires-
+      detail rule, enforced by a table `CHECK`, not just client-side/RPC
+      validation), not just client-side validation. Quantity is locked to
+      `1` at the database level (a selected mother record is always
+      exactly one whole plant) — revisit only if Phil later approves a
+      different model. Cutting selection does **not** collect these
+      facts — cutting content stays as it was. These facts are now
+      **exported to GM Commerce** too (`CommercePlantRecord.motherFacts`,
+      camelCased, always populated for a mother record and always `null`
+      for a cutting) — not just collected and left unused.
+    - **Migration**: a real forward-only, timestamped migration file
+      (`supabase/migrations/20260813221000_commerce_sku_standardization.sql`)
+      exists alongside the consolidated `supabase/schema.sql` (which
+      remains the fresh-database reference) — verified by applying it
+      against a simulated pre-this-change production database and
+      confirming byte-identical resulting schema to a fresh
+      `schema.sql` apply, plus confirming a second apply is a safe no-op.
+    - **RLS**: deliberately not added. This app has no Row Level Security
+      anywhere in `supabase/schema.sql` — every table is accessed
+      exclusively through `getSupabaseServerClient()`
+      (`lib/supabase.ts`), which always uses the Supabase **service role
+      key**, and the service role bypasses RLS entirely regardless of
+      whether policies exist. Adding RLS policies to only the new tables
+      would be inert (never evaluated by this app's own access pattern)
+      while implying a security boundary that isn't actually enforced
+      anywhere else in the codebase — inventing a new, inconsistent
+      security model for one feature, not closing a real gap. What *is*
+      new: every new `plpgsql` function pins `set search_path = public,
+      pg_temp`, closing the standard Postgres search-path-hijack risk,
+      which is a real hardening step that doesn't require inventing a
+      security model this app doesn't otherwise use.
     - **Deployment**: implemented and verified, **deliberately not
       deployed yet** — do not merge/push this until GM Commerce is
       ready to stop assuming `sourceRecordId === sku` and persist
@@ -709,8 +759,9 @@ confirmed yet.
       one. Before flipping this on in production, also run the legacy
       rollout query (in the implementation report) to find any
       currently-selected-but-unacknowledged records from before this
-      shipped and assign them real SKUs deliberately — do not assume
-      any specific record is "the only one" without actually querying.
+      shipped and assign them real SKUs **and mother-facts rows**
+      deliberately — do not assume any specific record is "the only one"
+      without actually querying.
 
 ## What NOT to do
 

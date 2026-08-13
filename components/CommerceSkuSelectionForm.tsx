@@ -12,14 +12,13 @@ const NEW_CODE_VALUE = "__new__";
 type Props = {
   kind: "cutting" | "mother";
   recordId: string;
-  motherId?: string; // required when kind === "cutting"
   initialState: CommerceHandoffState;
   sku?: string | null;
   genusCodes: GenusCode[];
   plantCodes: PlantCode[];
 };
 
-export function CommerceSkuSelectionForm({ kind, recordId, motherId, initialState, sku, genusCodes, plantCodes }: Props) {
+export function CommerceSkuSelectionForm({ kind, recordId, initialState, sku, genusCodes, plantCodes }: Props) {
   const [state, setState] = useState(initialState);
   const [assignedSku, setAssignedSku] = useState(sku ?? null);
   const [open, setOpen] = useState(false);
@@ -86,7 +85,7 @@ export function CommerceSkuSelectionForm({ kind, recordId, motherId, initialStat
 
     const result =
       kind === "cutting"
-        ? await selectCuttingForCommerce(recordId, motherId ?? "", genusCode, plantCode)
+        ? await selectCuttingForCommerce(recordId, genusCode, plantCode)
         : await selectMotherForCommerce(recordId, genusCode, plantCode, {
             photoSubject,
             potSize,

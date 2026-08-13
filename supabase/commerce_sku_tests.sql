@@ -61,20 +61,54 @@ select select_mother_for_commerce(
   false, 'prepared_other', 'Bare-root wrapped in damp paper towel', null
 ) as sku;
 
+-- Expect: rejected -- mother does not exist
+\echo '--- select_mother_for_commerce fails closed on a nonexistent mother ---'
+select select_mother_for_commerce(
+  'HY-DOESNOTEXIST', 'HY', 'CAR', 'exact_plant', '6in', '18in vine', true,
+  'ships_in_pot', null, null
+);
+
+-- Expect: rejected by the mother_commerce_facts CHECK constraint --
+-- prepared_other with no detail string
+\echo '--- prepared_other requires a detail string, enforced at the DB boundary ---'
+insert into mother_plants (mother_id, display_name, genus, species) values ('HY-TST04', 'x', 'Hoya', 'testus');
+select select_mother_for_commerce(
+  'HY-TST04', 'HY', 'CAR', 'exact_plant', '6in', '18in vine', true,
+  'prepared_other', null, null
+);
+
 -- Expect: cutting sku = HY-KRQ-01-C01; mother_plants.commerce_selected_at
 -- for HY-KRQ01 is still NULL (reservation must never select/export the
 -- mother)
 \echo '--- cutting selection reserves (never selects/exports) its mother ---'
-select select_cutting_for_commerce('HY-KRQ01-C01', 'HY-KRQ01', 'HY', 'KRQ') as cutting_sku;
+select select_cutting_for_commerce('HY-KRQ01-C01', 'HY', 'KRQ') as cutting_sku;
 select mother_id, commerce_selected_at from mother_plants where mother_id = 'HY-KRQ01';
 
 -- Expect: sku = HY-KRQ-01-C02 -- reuses the same mother SKU, distinct
 -- cutting sequence
-select select_cutting_for_commerce('HY-KRQ01-C02', 'HY-KRQ01', 'HY', 'KRQ') as cutting_sku_2;
+select select_cutting_for_commerce('HY-KRQ01-C02', 'HY', 'KRQ') as cutting_sku_2;
 
--- Expect: DB-enforced immutability -- all four rejected
+-- Expect: rejected -- the mother is derived from cuttings.mother_id
+-- inside the database, never trusted from a caller parameter, so there
+-- is nothing to spoof -- this call simply fails because the cutting
+-- itself does not exist.
+\echo '--- select_cutting_for_commerce fails closed on a nonexistent cutting ---'
+select select_cutting_for_commerce('HY-DOESNOTEXIST-C01', 'HY', 'KRQ');
+
+-- Expect: rejected -- HY-CAR01 already has commerce SKU HY-CAR-01 under
+-- HY/CAR; re-requesting it under a different plant code must fail, not
+-- silently keep the old assignment or silently reassign it.
+\echo '--- re-selecting an already-assigned mother under a different plant code is rejected ---'
+select select_mother_for_commerce(
+  'HY-CAR01', 'HY', 'ABH', 'exact_plant', '6in', '18in vine', true,
+  'ships_in_pot', null, null
+);
+
+-- Expect: DB-enforced immutability -- all six rejected (both UPDATE and
+-- DELETE against an assigned commerce_skus row, plus registry protection)
 \echo '--- immutability + registry protection ---'
 update commerce_skus set sku = 'HACKED-01' where source_record_id = 'HY-CAR01';
+delete from commerce_skus where source_record_id = 'HY-CAR01';
 delete from plant_codes where genus_code='HY' and code='CAR';
 update plant_codes set code = 'XXX' where genus_code='HY' and code='CAR';
 delete from genus_codes where code='HY';
