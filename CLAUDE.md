@@ -71,6 +71,24 @@ Env vars (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SITE_URL`,
 is the only place they live. The old `SITE_PASSWORD` env var (Basic Auth
 era) has been removed from Vercel; don't resurrect it.
 
+**2026-08-13 incident: login looked broken but wasn't.** The owner
+couldn't log in and was certain the password was right. Root cause
+turned out to be the free-tier Supabase project itself auto-pausing
+after ~7 days of no API traffic (Skrybix isn't used daily the way
+`gm-money-webapp` is) — the DB was unreachable, and the login action's
+generic failure path made that look identical to "wrong password."
+Recovered via **Resume project** in the Supabase dashboard; no data
+loss (auto-pause preserves everything). Fixed for good with a
+**Vercel Cron keepalive** (`app/api/cron/keepalive/route.ts`, wired in
+`vercel.json`, once daily) that does a real tiny Supabase query so the
+project never sits quiet long enough to pause again — chosen over
+upgrading to Supabase Pro since the owner didn't want the added cost.
+Optional `CRON_SECRET` env var (see `.env.example`) locks the route
+down to Vercel's own cron invocations; safe to leave unset, it just
+means the route doesn't verify the caller. If login ever looks broken
+again despite a correct password, check the Supabase project's pause
+state *before* assuming the password hash is wrong.
+
 - `app/` — Next.js App Router pages + Server Actions (`actions.ts` per
   route group) + API routes for CSV export
 - `lib/supabase.ts` — server-only Supabase client (`SUPABASE_SERVICE_ROLE_KEY`,
