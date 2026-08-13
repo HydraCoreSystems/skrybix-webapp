@@ -23,15 +23,17 @@ export default function LabelStartPicker({
   const overflow = start + count - 1 > LABELS_PER_SHEET;
 
   return (
-    <div className="no-print" style={{ marginBottom: 16 }}>
-      <label style={{ marginBottom: 6 }}>
+    <div className="no-print" style={{ marginBottom: 20 }}>
+      <label style={{ marginBottom: 8 }}>
         Start printing at position {start} — click the first blank label on your leftover sheet
       </label>
-      <div className="start-picker">{cells}</div>
-      <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
-        <span className="picker-legend used" /> already used
-        <span className="picker-legend will-print" /> will print this run
-        <span className="picker-legend empty" /> still blank
+      <div className="start-picker-panel">
+        <div className="start-picker">{cells}</div>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 10 }}>
+          <span className="picker-legend used" /> already used
+          <span className="picker-legend will-print" /> will print this run
+          <span className="picker-legend empty" /> still blank
+        </div>
       </div>
       {overflow && (
         <div className="flash error" style={{ marginTop: 10 }}>

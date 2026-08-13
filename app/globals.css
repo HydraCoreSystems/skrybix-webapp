@@ -384,37 +384,66 @@ label {
 .label-cell {
   outline: 1px dashed #ccc;
 }
+
+/* On-screen review only: the physical label footprint above (2.25in x
+   0.75in @ 96dpi ≈ 216x72px) is real and print-verified -- do not touch
+   those values, they were confirmed against an actual test print on
+   Avery 8257 stock (see CLAUDE.md). `zoom` scales the rendered box AND
+   reflows layout around it (unlike `transform: scale`), so the queue is
+   legible on a normal monitor without changing a single measurement
+   that matters at print time -- explicitly reset to 1 below so print
+   output is byte-for-byte the same as before this changed. */
+.label-sheet {
+  zoom: 1.45;
+}
+
 @media print {
   .label-cell {
     outline: none;
+  }
+  .label-sheet {
+    zoom: 1;
   }
 }
 
 /* Starting-position picker for printing onto a partially-used label
    sheet — a 3x10 grid matching the physical Avery 8257 layout, so
    picking a slot maps directly onto the leftover blank label the user
-   is looking at. Screen-only (.no-print already hides it on print). */
+   is looking at. Screen-only (.no-print already hides it on print).
+   Sized for on-screen legibility/click-target comfort, not tied to any
+   physical dimension the way .label-cell above is. */
+.start-picker-panel {
+  display: inline-block;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+}
+
 .start-picker {
   display: inline-grid;
-  grid-template-columns: repeat(3, 34px);
-  grid-auto-rows: 26px;
-  gap: 4px;
+  grid-template-columns: repeat(3, 52px);
+  grid-auto-rows: 40px;
+  gap: 6px;
 }
 
 .picker-cell {
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 11px;
+  border-radius: var(--radius-sm);
   text-decoration: none;
   color: var(--text);
   background: #fff;
+  transition: border-color 0.12s ease, background 0.12s ease;
 }
 
 .picker-cell:hover {
   border-color: var(--green);
+  background: var(--green-light);
 }
 
 .picker-cell.used {
