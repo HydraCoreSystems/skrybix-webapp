@@ -484,13 +484,28 @@ label {
   font-weight: 700;
 }
 
+.picker-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin-top: 14px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.picker-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
 .picker-legend {
   display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  margin: 0 4px 0 10px;
-  vertical-align: middle;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex-shrink: 0;
 }
 
 .picker-legend.used {
