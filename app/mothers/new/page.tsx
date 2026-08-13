@@ -1,6 +1,7 @@
 import { createMother } from "../actions";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import MotherNamingFields from "@/components/MotherNamingFields";
+import LocationSelect from "@/components/LocationSelect";
 
 export const dynamic = "force-dynamic";
 
@@ -12,16 +13,17 @@ export default async function NewMotherPage({ searchParams }: { searchParams: { 
   return (
     <div className="card">
       <h3 style={{ marginTop: 0 }}>Add Mother Plant</h3>
+      <p style={{ marginTop: 0 }}>
+        Mother ID is assigned automatically from the species (or, if unidentified, the cultivar/descriptor text
+        below) once you save.
+      </p>
       {searchParams.error && <div className="flash error">{searchParams.error}</div>}
       <form action={createMother}>
-        <label>Mother ID</label>
-        <input type="text" name="mother_id" required placeholder="e.g. M014" />
-
         <label>Display Name</label>
         <input type="text" name="display_name" required />
 
         <label>Location</label>
-        <input type="text" name="location" />
+        <LocationSelect />
 
         <MotherNamingFields speciesOptions={speciesOptions} />
 

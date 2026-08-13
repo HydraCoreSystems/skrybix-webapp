@@ -89,6 +89,61 @@ means the route doesn't verify the caller. If login ever looks broken
 again despite a correct password, check the Supabase project's pause
 state *before* assuming the password hash is wrong.
 
+**2026-08-13: real Mother_ID auto-assignment + Location dropdown added.**
+Two real regressions from the web app rebuild, both now fixed:
+
+- **Mother ID was a plain manually-typed text field on `/mothers/new`**,
+  with zero auto-generation — despite `mother_plants.spec3`/`mother_seq`
+  existing in the schema specifically for this and the owner being
+  explicit this was *never* something he chose by hand on the original
+  Sheet. The `reference/Skrybix_FIXED_v2.gs` script's own auto-ID logic
+  (`syncMotherRow_`, gated on a Hoya_Species match) only covers
+  identified species and doesn't explain the many real unidentified/
+  cultivar rows (`HY-AH 01`, `HY-CRY01`, `HY-DRA01`, etc.) — the real
+  rule turned out to live as data convention on the live sheet itself,
+  not as script code, and was recovered by reading the actual production
+  `Mother_Plants` data from Drive (not guessed): **Mother_ID = `HY-` +
+  the first 3 characters (uppercased, NOT trimmed) of the species name
+  if one is recorded, otherwise of the cultivar/descriptor text + a
+  zero-padded 2-digit sequence number for that code.** The trailing
+  space in IDs like `HY-AH 01` and `HY-CV 01` is real (the 3rd character
+  of "AH Black Magic" / "CV Marvel" is a space) — do not "fix" it away.
+  Implemented in `lib/mother-id.ts` (`deriveSpec3`/`buildMotherId`) +
+  `mother_id_counters` / `next_mother_seq()` in `supabase/schema.sql`
+  (atomic UPSERT counter, same pattern as `next_cutting_seq()` — never
+  regenerate by scanning `mother_plants` for a max value). **Before this
+  ships, the counter must be seeded from real production data** so it
+  can't collide with an existing Mother_ID — run this once in the
+  Supabase SQL editor after applying the updated `schema.sql`:
+  ```sql
+  insert into mother_id_counters (spec3, next_seq)
+  select spec3, max(mother_seq::int) + 1
+  from mother_plants
+  where spec3 is not null and mother_seq ~ '^[0-9]+$'
+  group by spec3
+  on conflict (spec3) do update
+    set next_seq = greatest(mother_id_counters.next_seq, excluded.next_seq);
+  ```
+  `/mothers/new` no longer has a Mother_ID input at all — it's assigned
+  server-side in `createMother()` after Species/Cultivar are known, and
+  shown read-only on the edit page as before (unchanged there, it was
+  already correctly `disabled`).
+- **Location was free text**; the owner wants a fixed dropdown instead.
+  Replaced with `components/LocationSelect.tsx` sourcing options from
+  `lib/locations.ts` (owner's 2026-08-13 list: Grow Room, Upstairs,
+  Upstairs Closet, Upstairs Grow Tent, Downstairs, Milsbo, Fabrikor) —
+  supersedes the old GR/UP/FA/MI/LR/UP-CLOSET abbreviations. Historical
+  rows keep whatever value they already have; the select adds the
+  current stored value as an extra option when it isn't one of the
+  standard seven, so editing a legacy row never silently overwrites its
+  location.
+
+This matters more than a typical cosmetic fix: Mother_ID is the string
+every downstream Cutting_ID (and therefore the GM Commerce SKU, see the
+commerce handoff above) is built from — getting the derivation wrong or
+seeding the counter wrong risks duplicate/colliding SKUs in a live
+sales channel, not just a display glitch.
+
 - `app/` — Next.js App Router pages + Server Actions (`actions.ts` per
   route group) + API routes for CSV export
 - `lib/supabase.ts` — server-only Supabase client (`SUPABASE_SERVICE_ROLE_KEY`,

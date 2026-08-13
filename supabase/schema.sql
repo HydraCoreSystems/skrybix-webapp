@@ -54,6 +54,38 @@ create table if not exists mother_plants (
   scan_count       int not null default 0
 );
 
+-- Persistent, never-reused Mother_ID sequence counter, one row per
+-- 3-letter code (`spec3`). Mirrors the real live-sheet convention
+-- (confirmed against actual production Mother_Plants rows, not guessed):
+-- Mother_ID = "HY-" + spec3 + zero-padded 2-digit sequence, e.g.
+-- "HY-ELL01" or, when the identifying text's 3rd character is a space,
+-- "HY-AH 01". spec3 is the first 3 characters (uppercased, NOT trimmed)
+-- of the species name when one is recorded, otherwise of the
+-- cultivar/descriptor text -- see lib/mother-id.ts. Never regenerate by
+-- scanning mother_plants for a max value; always go through
+-- next_mother_seq(), same rule as next_cutting_seq() below.
+create table if not exists mother_id_counters (
+  spec3    text primary key,
+  next_seq int not null default 1
+);
+
+-- Atomically reserves the next sequence number for a spec3 code.
+create or replace function next_mother_seq(p_spec3 text)
+returns int
+language plpgsql
+as $$
+declare
+  v_seq int;
+begin
+  insert into mother_id_counters (spec3, next_seq)
+  values (p_spec3, 2)
+  on conflict (spec3) do update
+    set next_seq = mother_id_counters.next_seq + 1
+  returning next_seq - 1 into v_seq;
+  return v_seq;
+end;
+$$;
+
 -- Persistent, never-reused per-mother cutting sequence counter.
 create table if not exists mother_cutting_counters (
   mother_id text primary key references mother_plants(mother_id),
