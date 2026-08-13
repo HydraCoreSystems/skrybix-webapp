@@ -63,3 +63,19 @@ export function composeBotanicalLine2(fields: NameTypeFields): string {
   // straight quotes).
   return `‘${cultivar}’`;
 }
+
+// Display_Name, confirmed against the real live sheet, is just
+// Botanical_Line1 + " " + Botanical_Line2 with straight quotes instead of
+// the curly quotes used on Line2 for printed labels -- e.g. Line1 "Hoya
+// multiflora" + Line2 "'wonderphil'" -> Display_Name "Hoya multiflora
+// 'wonderphil'". Takes the lines as actually submitted (not recomposed
+// independently) so a deliberate manual override of either line (e.g. a
+// hybrid-cross breeding note) carries through consistently instead of the
+// two silently diverging.
+export function composeDisplayName(line1: string, line2: string): string {
+  const straighten = (s: string) => s.replace(/[‘’]/g, "'");
+  return [straighten(line1), straighten(line2)]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(" ");
+}

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { markSpeciesOwnedIfNeeded } from "@/lib/species-tracker";
 import { buildMotherId, deriveSpec3 } from "@/lib/mother-id";
+import { composeDisplayName } from "@/lib/hoya-naming";
 
 function nullIfBlank(v: FormDataEntryValue | null): string | null {
   const s = String(v ?? "").trim();
@@ -25,12 +26,6 @@ function namingFieldsFromForm(formData: FormData) {
 }
 
 export async function createMother(formData: FormData) {
-  const displayName = String(formData.get("display_name") || "").trim();
-
-  if (!displayName) {
-    redirect("/mothers/new?error=" + encodeURIComponent("Display Name is required."));
-  }
-
   const naming = namingFieldsFromForm(formData);
   const spec3 = deriveSpec3(naming.species, naming.cultivar);
   if (!spec3) {
@@ -39,6 +34,8 @@ export async function createMother(formData: FormData) {
         encodeURIComponent("Enter either a Species or a Cultivar/Collection Code/Descriptor to assign a Mother ID.")
     );
   }
+
+  const displayName = composeDisplayName(naming.botanical_line1 || "", naming.botanical_line2 || "");
 
   const supabase = getSupabaseServerClient();
 
@@ -74,10 +71,11 @@ export async function createMother(formData: FormData) {
 export async function updateMother(motherId: string, formData: FormData) {
   const supabase = getSupabaseServerClient();
   const naming = namingFieldsFromForm(formData);
+  const displayName = composeDisplayName(naming.botanical_line1 || "", naming.botanical_line2 || "");
   const { error } = await supabase
     .from("mother_plants")
     .update({
-      display_name: String(formData.get("display_name") || "").trim(),
+      display_name: displayName,
       location: nullIfBlank(formData.get("location")),
       ...naming,
     })
