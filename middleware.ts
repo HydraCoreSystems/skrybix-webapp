@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session";
 
 // Server-enforced session gate. Runs before every request (Vercel Edge
-// Middleware) except public routes and the commerce handoff routes, which
-// verify their own bearer credential. It protects all other API routes and
-// server actions too, not just page navigation — a frontend-only lock
-// screen would be trivially bypassed by hitting a route directly. Fails
-// closed if AUTH_SECRET isn't configured, rather than silently letting
-// requests through unauthenticated.
+// Middleware) except public routes and routes that verify their own bearer
+// credential (commerce handoff, cron keepalive). It protects all other API
+// routes and server actions too, not just page navigation — a
+// frontend-only lock screen would be trivially bypassed by hitting a route
+// directly. Fails closed if AUTH_SECRET isn't configured, rather than
+// silently letting requests through unauthenticated.
 //
 // /plant/** (the public QR-code landing pages for mothers and cuttings)
 // must stay open to anyone -- that's the whole point of a QR code on a
@@ -17,6 +17,11 @@ import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session";
 // exclusion below -- any future public-facing page that references it
 // (a public page doesn't help if its own logo 404s for anonymous
 // visitors) needs it explicitly listed here too.
+//
+// /api/cron/keepalive must also stay outside the session gate -- Vercel
+// invokes cron jobs directly, with no browser session cookie, so gating it
+// here would make the keepalive itself 401 and defeat its whole purpose
+// (see that route for why it exists and its own CRON_SECRET check).
 export async function middleware(request: NextRequest) {
   const secret = process.env.AUTH_SECRET;
   if (!secret) {
@@ -32,5 +37,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|login|plant|gm-logo.png|api/commerce/v1/plants).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|login|plant|gm-logo.png|api/commerce/v1/plants|api/cron/keepalive).*)",
+  ],
 };
