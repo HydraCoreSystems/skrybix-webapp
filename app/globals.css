@@ -1,9 +1,12 @@
-/* Skrybix brand identity — carried over from the Flask prototype's
-   green/cream palette for visual continuity across the rebuild. */
+/* Skrybix brand identity — green/cream palette carried over from the
+   Flask prototype for continuity, given real visual depth (gradients,
+   shadow, hover motion) 2026-08-13 after the flat original read as
+   "boring"/"grayed out" rather than calm-and-deliberate. */
 
 :root {
   color-scheme: light;
   --green: #2f5d3a;
+  --green-mid: #3c7249;
   --green-dark: #1f3f27;
   --green-light: #e4f3e6;
   --bg: #f7f5f0;
@@ -14,8 +17,11 @@
   --red: #8c2b21;
   --red-bg: #fbe6e4;
 
-  --radius: 10px;
-  --radius-sm: 6px;
+  --radius: 12px;
+  --radius-sm: 8px;
+
+  --shadow-sm: 0 1px 2px rgba(31, 63, 39, 0.06), 0 1px 3px rgba(31, 63, 39, 0.08);
+  --shadow-md: 0 4px 10px rgba(31, 63, 39, 0.1), 0 2px 4px rgba(31, 63, 39, 0.06);
 }
 
 * {
@@ -34,32 +40,67 @@ a {
 }
 
 header.topnav {
-  background: var(--green);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  background: linear-gradient(135deg, var(--green-dark), var(--green));
   color: white;
-  padding: 14px 24px;
+  padding: 12px 24px;
+  box-shadow: var(--shadow-md);
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 header.topnav a {
   color: white;
   text-decoration: none;
-  margin-right: 18px;
   font-size: 14px;
-  opacity: 0.9;
+  padding: 7px 14px;
+  border-radius: 999px;
+  opacity: 0.85;
+  transition: background 0.15s ease, opacity 0.15s ease;
 }
 
 header.topnav a:hover {
   opacity: 1;
-  text-decoration: underline;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+header.topnav a.active {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.22);
+  font-weight: 600;
 }
 
 header.topnav .brand {
   font-weight: 700;
   font-size: 18px;
-  margin-right: 28px;
+  margin-right: 14px;
+  padding: 7px 4px;
+  letter-spacing: 0.2px;
+}
+
+header.topnav .logout-btn {
+  background: none;
+  border: none;
+  color: white;
+  opacity: 0.85;
+  cursor: pointer;
+  font: inherit;
+  padding: 7px 14px;
+  border-radius: 999px;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+header.topnav .logout-btn:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 main {
-  max-width: 980px;
+  max-width: 1180px;
   margin: 24px auto;
   padding: 0 20px;
 }
@@ -68,8 +109,29 @@ main {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 18px 20px;
+  padding: 20px 22px;
   margin-bottom: 18px;
+  box-shadow: var(--shadow-sm);
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.page-header h3 {
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 table {
@@ -80,7 +142,7 @@ table {
 th,
 td {
   text-align: left;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   font-size: 14px;
 }
@@ -88,26 +150,73 @@ td {
 th {
   color: var(--muted);
   font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+tbody tr {
+  transition: background 0.12s ease;
+}
+
+tbody tr:hover {
+  background: var(--green-light);
 }
 
 .btn {
-  display: inline-block;
-  background: var(--green);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, var(--green-mid), var(--green-dark));
   color: white;
-  border: none;
-  padding: 7px 14px;
+  border: 1px solid transparent;
+  padding: 8px 16px;
   border-radius: var(--radius-sm);
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   text-decoration: none;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
 }
 
+.btn:hover {
+  filter: brightness(1.08);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  transform: translateY(0);
+  filter: brightness(0.98);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--green-mid);
+  outline-offset: 2px;
+}
+
+/* Secondary used to be flat gray (#7a7a72), which read as a disabled
+   control rather than a live button -- the #1 complaint driving this
+   pass. Real outline/"ghost" treatment instead: still clearly a button,
+   clearly not the primary action, never looks disabled. */
 .btn.secondary {
-  background: #7a7a72;
+  background: var(--card);
+  color: var(--green-dark);
+  border: 1.5px solid var(--green);
+  box-shadow: none;
+}
+
+.btn.secondary:hover {
+  background: var(--green-light);
+  filter: none;
+  box-shadow: none;
 }
 
 .btn.small {
-  padding: 4px 9px;
+  padding: 5px 11px;
   font-size: 12px;
 }
 
@@ -117,10 +226,36 @@ form.inline {
 
 input,
 select {
-  padding: 6px 8px;
+  padding: 7px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: 14px;
+  background: var(--card);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--green-mid);
+  box-shadow: 0 0 0 3px rgba(47, 93, 58, 0.12);
+}
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.search-bar input[type="search"] {
+  flex: 1;
+  max-width: 340px;
+}
+
+.search-result-count {
+  font-size: 13px;
+  color: var(--muted);
 }
 
 label {

@@ -4,6 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logout } from "@/app/login/actions";
 
+const LINKS = [
+  { href: "/", label: "Dashboard" },
+  { href: "/mothers", label: "Mother Plants" },
+  { href: "/cuttings", label: "Cuttings" },
+  { href: "/outgoing", label: "Outgoing Log" },
+  { href: "/settings/password", label: "Settings" },
+];
+
 export default function Nav() {
   const pathname = usePathname();
   if (pathname === "/login") return null;
@@ -11,24 +19,16 @@ export default function Nav() {
   return (
     <header className="topnav no-print">
       <span className="brand">Skrybix</span>
-      <Link href="/">Dashboard</Link>
-      <Link href="/mothers">Mother Plants</Link>
-      <Link href="/cuttings">Cuttings</Link>
-      <Link href="/outgoing">Outgoing Log</Link>
-      <Link href="/settings/password">Settings</Link>
-      <form action={logout} style={{ display: "inline" }}>
-        <button
-          type="submit"
-          style={{
-            background: "none",
-            border: "none",
-            color: "white",
-            opacity: 0.9,
-            cursor: "pointer",
-            font: "inherit",
-            padding: 0,
-          }}
-        >
+      {LINKS.map(({ href, label }) => {
+        const active = href === "/" ? pathname === "/" : pathname?.startsWith(href);
+        return (
+          <Link key={href} href={href} className={active ? "active" : undefined}>
+            {label}
+          </Link>
+        );
+      })}
+      <form action={logout} style={{ marginLeft: "auto" }}>
+        <button type="submit" className="logout-btn">
           Log out
         </button>
       </form>

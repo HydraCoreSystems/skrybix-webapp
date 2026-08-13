@@ -1,16 +1,28 @@
 import { getSupabaseServerClient } from "@/lib/supabase";
+import { matchesQuery } from "@/lib/search";
+import SearchBox from "@/components/SearchBox";
 import type { OutgoingLogEntry } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function OutgoingPage() {
+export default async function OutgoingPage({ searchParams }: { searchParams: { q?: string } }) {
   const supabase = getSupabaseServerClient();
   const { data: rowsRaw } = await supabase.from("outgoing_log").select("*").order("id", { ascending: false });
-  const rows = (rowsRaw ?? []) as OutgoingLogEntry[];
+  const allRows = (rowsRaw ?? []) as OutgoingLogEntry[];
+  const q = searchParams.q ?? "";
+  const rows = allRows.filter((r) =>
+    matchesQuery([r.cutting_id, r.full_display_name, r.reason, r.selling_platform, r.notes], q)
+  );
 
   return (
     <div className="card">
       <h3 style={{ marginTop: 0 }}>Outgoing Log</h3>
+      <SearchBox placeholder="Search by Cutting ID, plant, reason…" defaultValue={q} />
+      {q && (
+        <p className="search-result-count">
+          {rows.length} of {allRows.length} entries match "{q}"
+        </p>
+      )}
       <table>
         <thead>
           <tr>
