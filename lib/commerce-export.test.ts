@@ -3,46 +3,92 @@ import test from "node:test";
 import {
   createCommerceExport,
   isCommerceExportRequestAuthorized,
-  selectCommerceRecord,
-  type CommerceSelectionSource,
+  normalizeCuttingForCommerce,
+  normalizeMotherForCommerce,
+  type CuttingCommerceSource,
+  type MotherCommerceSource,
 } from "./commerce-export.ts";
+import { validateGenusCode, validatePlantCode } from "./commerce-sku.ts";
 
-test("commerce selection is durable and idempotent", async () => {
-  const rows = new Map<string, CommerceSelectionSource>([
-    [
-      "HY-ABC01-C01",
-      {
-        commerce_selected_at: null,
-        commerce_acknowledged_at: null,
-      },
-    ],
-  ]);
-  const repository = {
-    async claimUnselected(id: string, selectedAt: string) {
-      const row = rows.get(id);
-      if (!row || row.commerce_selected_at) {
-        return { record: null, error: null };
-      }
-      const selected = { ...row, commerce_selected_at: selectedAt };
-      rows.set(id, selected);
-      return { record: selected, error: null };
-    },
-    async findById(id: string) {
-      return { record: rows.get(id) ?? null, error: null };
-    },
+// The SQL-level guarantees (atomic mother/cutting SKU allocation,
+// database-enforced immutability, concurrent selection never allocating
+// duplicate sequences or side-effect-selecting a mother, registry
+// rename/delete protection) live in Postgres functions/constraints, not
+// in this JS module -- they were verified directly against a real local
+// Postgres 16 instance before this file was written (every scenario in
+// the owner's required-tests list that's a database concern, not a pure-
+// function concern). See docs/Skrybix_Commerce_SKU_Design_Report.md and
+// the implementation report for the exact commands and output. What
+// belongs here is the pure-function layer: export shaping, fail-closed
+// behavior, and the sourceRecordId/sku distinction.
+
+test("sourceRecordId and sku are demonstrably different values", () => {
+  const cutting: CuttingCommerceSource = {
+    cutting_id: "HY-KRQ01-C01",
+    mother_id: "HY-KRQ01",
+    full_display_name: "Hoya krohniana",
+    sold: false,
+    archived_at: null,
+    created_at: "2026-07-01T00:00:00.000Z",
+    commerce_selected_at: "2026-08-13T00:00:00.000Z",
+    commerce_acknowledged_at: null,
   };
 
-  const firstSelection = await selectCommerceRecord(repository, "HY-ABC01-C01", "2026-08-01T00:00:00.000Z");
-  const secondSelection = await selectCommerceRecord(repository, "HY-ABC01-C01", "2026-08-02T00:00:00.000Z");
+  const record = normalizeCuttingForCommerce(cutting, "HY-KRQ-01-C01");
 
-  assert.equal(firstSelection.error, null);
-  assert.equal(firstSelection.alreadySelected, false);
-  assert.equal(secondSelection.error, null);
-  assert.equal(secondSelection.alreadySelected, true);
-  assert.equal(rows.get("HY-ABC01-C01")?.commerce_selected_at, "2026-08-01T00:00:00.000Z");
+  assert.equal(record.sourceRecordId, "HY-KRQ01-C01");
+  assert.equal(record.sku, "HY-KRQ-01-C01");
+  assert.notEqual(record.sourceRecordId, record.sku);
 });
 
-test("authenticated commerce export returns selected cuttings and mothers only", () => {
+test("a source record ID containing a real space remains valid and is never rewritten", () => {
+  // Confirmed real production case (not fabricated) -- see the design
+  // report's material-conflict check.
+  const mother: MotherCommerceSource = {
+    mother_id: "HY-AH 05",
+    display_name: "Hoya AH Black Magic",
+    sold: false,
+    archived_at: null,
+    created_at: "2026-07-01T00:00:00.000Z",
+    commerce_selected_at: "2026-08-13T00:00:00.000Z",
+    commerce_acknowledged_at: null,
+  };
+
+  const record = normalizeMotherForCommerce(mother, "HY-ABH-01");
+
+  assert.equal(record.sourceRecordId, "HY-AH 05");
+  assert.equal(record.sku, "HY-ABH-01");
+});
+
+test("fails closed: a selected record with no resolvable SKU is never exported with a fallback sku", () => {
+  const cutting: CuttingCommerceSource = {
+    cutting_id: "HY-KRQ01-C01",
+    mother_id: "HY-KRQ01",
+    full_display_name: "Hoya krohniana",
+    sold: false,
+    archived_at: null,
+    created_at: "2026-07-01T00:00:00.000Z",
+    commerce_selected_at: "2026-08-13T00:00:00.000Z",
+    commerce_acknowledged_at: null,
+  };
+
+  assert.throws(() => normalizeCuttingForCommerce(cutting, null), /no assigned commerce SKU/);
+  assert.throws(() => normalizeCuttingForCommerce(cutting, undefined), /no assigned commerce SKU/);
+  assert.throws(() => normalizeCuttingForCommerce(cutting, ""), /no assigned commerce SKU/);
+
+  const mother: MotherCommerceSource = {
+    mother_id: "HY-AH 05",
+    display_name: "x",
+    sold: false,
+    archived_at: null,
+    created_at: "2026-07-01T00:00:00.000Z",
+    commerce_selected_at: "2026-08-13T00:00:00.000Z",
+    commerce_acknowledged_at: null,
+  };
+  assert.throws(() => normalizeMotherForCommerce(mother, null), /no assigned commerce SKU/);
+});
+
+test("mixed mother/cutting response: both record types export correctly in one payload with distinct SKUs", () => {
   const handoff = createCommerceExport(
     [
       {
@@ -96,6 +142,10 @@ test("authenticated commerce export returns selected cuttings and mothers only",
         commerce_acknowledged_at: null,
       },
     ],
+    new Map([
+      ["HY-ABC01-C01", "HY-ABC-01-C01"],
+      ["HY-XYZ01", "HY-XYZ-01"],
+    ]),
     "2026-08-01T02:00:00.000Z"
   );
 
@@ -110,7 +160,7 @@ test("authenticated commerce export returns selected cuttings and mothers only",
       {
         sourceSystem: "skrybix",
         sourceRecordId: "HY-ABC01-C01",
-        sku: "HY-ABC01-C01",
+        sku: "HY-ABC-01-C01",
         displayName: "Hoya example",
         parentSourceRecordId: "HY-ABC01",
         plantRecordType: "cutting",
@@ -124,7 +174,7 @@ test("authenticated commerce export returns selected cuttings and mothers only",
       {
         sourceSystem: "skrybix",
         sourceRecordId: "HY-XYZ01",
-        sku: "HY-XYZ01",
+        sku: "HY-XYZ-01",
         displayName: "Hoya whole-mother example",
         parentSourceRecordId: null,
         plantRecordType: "mother",
@@ -137,4 +187,23 @@ test("authenticated commerce export returns selected cuttings and mothers only",
       },
     ],
   });
+});
+
+test("genus code validation: exactly 2 uppercase letters", () => {
+  assert.equal(validateGenusCode("HY"), null);
+  assert.equal(validateGenusCode("AL"), null);
+  assert.match(validateGenusCode("hy") ?? "", /2 uppercase letters/);
+  assert.match(validateGenusCode("H") ?? "", /2 uppercase letters/);
+  assert.match(validateGenusCode("HYX") ?? "", /2 uppercase letters/);
+  assert.match(validateGenusCode("H1") ?? "", /2 uppercase letters/);
+});
+
+test("plant code validation: exactly 3 uppercase letters/digits, no spaces or punctuation", () => {
+  assert.equal(validatePlantCode("KRQ"), null);
+  assert.equal(validatePlantCode("AB1"), null);
+  assert.match(validatePlantCode("krq") ?? "", /3 uppercase/);
+  assert.match(validatePlantCode("AB") ?? "", /3 uppercase/);
+  assert.match(validatePlantCode("ABCD") ?? "", /3 uppercase/);
+  assert.match(validatePlantCode("A-B") ?? "", /3 uppercase/);
+  assert.match(validatePlantCode("A B") ?? "", /3 uppercase/);
 });

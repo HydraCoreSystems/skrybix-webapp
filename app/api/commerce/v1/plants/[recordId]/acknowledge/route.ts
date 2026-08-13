@@ -8,10 +8,22 @@ import {
   type CuttingCommerceSource,
   type MotherCommerceSource,
 } from "@/lib/commerce-export";
-import { getSupabaseServerClient } from "@/lib/supabase";
+import { getSupabaseServerClient, type SupabaseServerClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+async function lookupSku(supabase: SupabaseServerClient, recordId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("commerce_skus")
+    .select("sku")
+    .eq("source_record_id", recordId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Unable to resolve Skrybix commerce SKU: ${error.message}`);
+  }
+  return (data?.sku as string | undefined) ?? null;
+}
 
 export async function POST(request: NextRequest, { params }: { params: { recordId: string } }) {
   if (!isCommerceExportRequestAuthorized(request.headers.get("authorization"), process.env.COMMERCE_EXPORT_KEY)) {
@@ -49,8 +61,9 @@ export async function POST(request: NextRequest, { params }: { params: { recordI
     throw new Error(`Unable to acknowledge Skrybix commerce record: ${cuttingError.message}`);
   }
   if (cuttingRow) {
+    const sku = await lookupSku(supabase, recordId);
     return NextResponse.json(
-      { record: normalizeCuttingForCommerce(cuttingRow as CuttingCommerceSource), alreadyAcknowledged: false },
+      { record: normalizeCuttingForCommerce(cuttingRow as CuttingCommerceSource, sku), alreadyAcknowledged: false },
       { headers: { "Cache-Control": "no-store" } }
     );
   }
@@ -68,9 +81,10 @@ export async function POST(request: NextRequest, { params }: { params: { recordI
     throw new Error(`Unable to acknowledge Skrybix commerce record: ${motherError.message}`);
   }
   if (motherRow) {
+    const sku = await lookupSku(supabase, recordId);
     return NextResponse.json(
       {
-        record: normalizeMotherForCommerce({ ...motherRow, archived_at: null } as MotherCommerceSource),
+        record: normalizeMotherForCommerce({ ...motherRow, archived_at: null } as MotherCommerceSource, sku),
         alreadyAcknowledged: false,
       },
       { headers: { "Cache-Control": "no-store" } }
@@ -90,7 +104,8 @@ export async function POST(request: NextRequest, { params }: { params: { recordI
     throw new Error(`Unable to read Skrybix commerce record: ${existingCuttingError.message}`);
   }
   if (existingCutting) {
-    return describeAcknowledgeFailure(existingCutting as CuttingCommerceSource, normalizeCuttingForCommerce);
+    const sku = await lookupSku(supabase, recordId);
+    return describeAcknowledgeFailure(existingCutting as CuttingCommerceSource, sku, normalizeCuttingForCommerce);
   }
 
   const { data: existingMother, error: existingMotherError } = await supabase
@@ -103,8 +118,10 @@ export async function POST(request: NextRequest, { params }: { params: { recordI
     throw new Error(`Unable to read Skrybix commerce record: ${existingMotherError.message}`);
   }
   if (existingMother) {
+    const sku = await lookupSku(supabase, recordId);
     return describeAcknowledgeFailure(
       { ...existingMother, archived_at: null } as MotherCommerceSource,
+      sku,
       normalizeMotherForCommerce
     );
   }
@@ -114,14 +131,15 @@ export async function POST(request: NextRequest, { params }: { params: { recordI
 
 function describeAcknowledgeFailure<T extends { commerce_selected_at: string | null; commerce_acknowledged_at: string | null }>(
   existing: T,
-  normalize: (row: T) => ReturnType<typeof normalizeCuttingForCommerce>
+  sku: string | null,
+  normalize: (row: T, sku: string | null | undefined) => ReturnType<typeof normalizeCuttingForCommerce>
 ) {
   if (!existing.commerce_selected_at) {
     return NextResponse.json({ error: "Record has not been selected for GM Commerce." }, { status: 409 });
   }
   if (existing.commerce_acknowledged_at) {
     return NextResponse.json(
-      { record: normalize(existing), alreadyAcknowledged: true },
+      { record: normalize(existing, sku), alreadyAcknowledged: true },
       { headers: { "Cache-Control": "no-store" } }
     );
   }

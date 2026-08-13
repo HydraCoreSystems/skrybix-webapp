@@ -628,6 +628,90 @@ confirmed yet.
     wasn't asked for. Revisit if/when the owner actually sells a mother
     plant and wants that logged somewhere.
 
+14. **2026-08-13 DECISION RECORD — plant source identity and commercial
+    SKU are separate, immutable concepts.** Full design rationale in
+    `docs/Skrybix_Commerce_SKU_Design_Report.md`; this is the durable
+    summary. Owner-approved architecture, implemented and verified
+    against a real local Postgres instance, **not yet deployed** — see
+    "deployment" below.
+
+    - `Mother_ID`/`Cutting_ID` (the existing `mother_plants.mother_id`/
+      `cuttings.cutting_id` primary keys) are **permanent, opaque source
+      identities** — never renamed, never regex-normalized, never
+      touched by anything in this feature. Real IDs may contain a space
+      (`HY-AH 05` etc.) and must stay exactly as-is. This is
+      non-negotiable specifically because mother QR codes are printed
+      with the literal current `mother_id` baked into the image on
+      physical labels already in circulation (`lib/qr.ts`) — changing
+      one would 404 every already-printed QR code with no way to
+      reissue history.
+    - A **separate, additive, immutable commercial SKU** is assigned
+      per record: `{GENUS}-{PLANT}-{MOTHER}` for a mother,
+      `{GENUS}-{PLANT}-{MOTHER}-C{CUTTING}` for a cutting. `GENUS` is 2
+      uppercase letters, `PLANT` is 3 uppercase letters/digits, both
+      from controlled registries (`genus_codes`/`plant_codes`,
+      `supabase/schema.sql`) — never derived by slicing a name. Approved
+      initial codes: `HY` = Hoya, `AL` = Alocasia. **Do not add further
+      genus codes speculatively** — add one deliberately, in
+      `genus_codes`, only when a plant of that genus is actually about
+      to be sold.
+    - SKUs are assigned **atomically at first GM Commerce selection**,
+      not at record creation — `select_mother_for_commerce()`/
+      `select_cutting_for_commerce()` (`supabase/schema.sql`), each one
+      Postgres function body (one transaction). Selecting a cutting
+      whose mother has no SKU yet **reserves** the mother's SKU first —
+      this never selects, exports, or acknowledges the mother as a side
+      effect; that stays a separate, explicit human action. Verified
+      live under real concurrency (two cuttings selected simultaneously
+      from the same never-before-selected mother → exactly one mother
+      SKU, two distinct cutting sequences, mother still unselected
+      afterward) and for rollback atomicity (a failed mother-facts
+      validation rolls back the SKU assignment that happened earlier in
+      the same call, leaving zero rows behind).
+    - Immutability is **database-enforced**, not just "no application
+      code updates it": a trigger rejects any `UPDATE` on `commerce_skus`
+      outright, and real foreign keys from `commerce_skus` to
+      `genus_codes`/`plant_codes` mean a registry code already used in
+      an assigned SKU can't be renamed or deleted — Postgres refuses
+      automatically, no extra trigger needed for that part. All of this
+      was verified against a real local Postgres 16 instance (not
+      reasoned about on paper) — see `supabase/commerce_sku_tests.sql`
+      for the reproducible script and the implementation report for full
+      output.
+    - `sourceRecordId` (GM Commerce API) is still the permanent Skrybix
+      ID, used for acknowledgement and idempotent import, exactly as
+      before. `sku` is now looked up from `commerce_skus`, never equal
+      to `sourceRecordId` by construction. `normalizeCuttingForCommerce`/
+      `normalizeMotherForCommerce` (`lib/commerce-export.ts`) **fail
+      closed** — throw rather than export a selected record with no
+      resolvable SKU — instead of ever falling back to `sourceRecordId`
+      as a placeholder SKU.
+    - **Required mother-sale facts**, collected at first mother
+      selection, never inferred from `plantRecordType="mother"` and
+      never read from the general `notes` field: sale-photo subject
+      (exact plant vs. representative), pot size, approximate
+      plant/vine size, rooted/established confirmation, shipping
+      presentation (ships in pot vs. prepared another way, with a
+      required detail when the latter). Optional but exportable:
+      condition/recent-cutback notes. `mother_commerce_facts`
+      (`supabase/schema.sql`) enforces the required ones as real
+      `NOT NULL`/`CHECK` columns, not just client-side validation.
+      Quantity is locked to `1` at the database level (a selected
+      mother record is always exactly one whole plant) — revisit only
+      if Phil later approves a different model. Cutting selection does
+      **not** collect these facts — cutting content stays as it was.
+    - **Deployment**: implemented and verified, **deliberately not
+      deployed yet** — do not merge/push this until GM Commerce is
+      ready to stop assuming `sourceRecordId === sku` and persist
+      whatever `sku` it receives verbatim. Coordinate the cutover so
+      there's no mixed/ambiguous period where some selected records
+      have the old (source-ID-as-SKU) behavior and some have the new
+      one. Before flipping this on in production, also run the legacy
+      rollout query (in the implementation report) to find any
+      currently-selected-but-unacknowledged records from before this
+      shipped and assign them real SKUs deliberately — do not assume
+      any specific record is "the only one" without actually querying.
+
 ## What NOT to do
 
 - Do not replicate the Sheets/Apps Script architecture itself when

@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { CommerceSelectionControl } from "@/components/CommerceSelectionControl";
+import { CommerceSkuSelectionForm } from "@/components/CommerceSkuSelectionForm";
 import { getCommerceHandoffState } from "@/lib/commerce-export";
+import { getCommerceCodeOptions } from "@/lib/commerce-codes";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { toggleMotherField } from "./actions";
 import { matchesQuery } from "@/lib/search";
@@ -23,6 +24,24 @@ export default async function MothersPage({
   const rows = allRows.filter((m) =>
     matchesQuery([m.mother_id, m.display_name, m.location, m.species, m.cultivar, m.botanical_line1, m.botanical_line2], q)
   );
+
+  const { genusCodes, plantCodes } = await getCommerceCodeOptions();
+
+  // Only fetched for rows that are actually selected/acknowledged, to
+  // show the assigned SKU next to "Selected for GM Commerce" -- most
+  // rows never reach commerce selection, so this is usually a small
+  // lookup, not a full-table join.
+  const selectedIds = rows.filter((m) => m.commerce_selected_at).map((m) => m.mother_id);
+  const skusByRecordId = new Map<string, string>();
+  if (selectedIds.length > 0) {
+    const { data: skuRows } = await supabase
+      .from("commerce_skus")
+      .select("source_record_id,sku")
+      .in("source_record_id", selectedIds);
+    for (const row of skuRows ?? []) {
+      skusByRecordId.set(row.source_record_id as string, row.sku as string);
+    }
+  }
 
   return (
     <div className="card">
@@ -89,7 +108,14 @@ export default async function MothersPage({
                 </form>
               </td>
               <td>
-                <CommerceSelectionControl recordId={m.mother_id} kind="mother" initialState={getCommerceHandoffState(m)} />
+                <CommerceSkuSelectionForm
+                  recordId={m.mother_id}
+                  kind="mother"
+                  initialState={getCommerceHandoffState(m)}
+                  sku={skusByRecordId.get(m.mother_id)}
+                  genusCodes={genusCodes}
+                  plantCodes={plantCodes}
+                />
               </td>
               <td>{m.scan_count}</td>
               <td>
