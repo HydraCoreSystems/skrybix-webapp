@@ -1,7 +1,7 @@
 # Skrybix Commerce SKU Standardization — Design Report
 
 **Date:** 2026-08-13
-**Status:** Design/read-only. No code changes made. Nothing implemented, no migrations run, GM Commerce untouched, Etsy not activated.
+**Status:** See "Implementation status" addendum at the end of this document for the current state — this file started as a design-only report and has since been updated as the design was reviewed and approved.
 **Scope:** Answers the 12 requested points + the mother-plant content-semantics gap inventory + the material-conflict check, against the current `master` branch (post-PR #9).
 
 ---
@@ -220,3 +220,60 @@ I grepped the full schema, `lib/types.ts`, and everything under `app/mothers` fo
 | Condition/recent-cutback notes | No dedicated field — `mother_plants.notes` is a free-text column that *could* hold this informally today, but nothing structured, nothing GM-Commerce-exportable, and nothing that distinguishes "recent cutback" from any other kind of note |
 
 **Per your explicit instruction, I have not invented defaults or synthetic values for any of these.** They are a genuine, confirmed data gap. Closing it (schema + entry-form fields + export) is separable work from the SKU standardization above — happy to scope it as its own design pass once you decide whether it's Skrybix's job to capture these or GM Commerce's job to collect them post-import.
+
+---
+
+## Implementation status (added 2026-08-13, after owner approval)
+
+The design above was reviewed and approved with corrections (see the durable decision record in `CLAUDE.md`). Per that approval, the implementation was built and thoroughly tested — **but is deliberately not committed or pushed to this branch/PR**. Only this design report document is being pushed right now. Everything below describes what exists locally, pending your review before it goes anywhere near GitHub or production.
+
+### What was built
+
+- `genus_codes`, `plant_codes`, `commerce_skus` (surrogate PK + `unique (plant_record_type, source_record_id)` + `unique (sku)`, real FK columns to the registries — not a bare `source_record_id primary key` as originally drafted, per your correction), `mother_commerce_facts`, and two atomic sequence-counter tables — all in `supabase/schema.sql`.
+- `select_mother_for_commerce()` / `select_cutting_for_commerce()` — one Postgres function body each (one transaction): SKU assignment, mother-fact recording (mother only), and marking the record selected either all commit or all roll back together. A cutting selection reserves its mother's SKU first without ever selecting/exporting the mother.
+- A trigger makes `commerce_skus` rows fully immutable at the database level (any `UPDATE` is rejected outright), and real foreign keys from `commerce_skus` to `genus_codes`/`plant_codes` mean Postgres itself refuses to rename or delete a registry code that's already been used in an assigned SKU.
+- `lib/commerce-export.ts` updated: `sku` is now looked up, never derived from `sourceRecordId`; `normalizeCuttingForCommerce`/`normalizeMotherForCommerce` fail closed (throw) rather than ever falling back to `sourceRecordId` as a placeholder SKU.
+- Both API routes (`GET /api/commerce/v1/plants`, the acknowledge route) updated to resolve real SKUs. **JSON shape is unchanged** — `sourceRecordId` and `sku` were already separate fields.
+- `app/mothers/actions.ts`/`app/cuttings/actions.ts`: `selectMotherForCommerce`/`selectCuttingForCommerce` now call the new RPCs and require genus/plant codes (+ facts for mothers) instead of being a bare checkbox.
+- `components/CommerceSkuSelectionForm.tsx` (replacing the old `CommerceSelectionControl.tsx`): collects genus/plant code (pick existing or create new inline, mirroring the existing species-datalist pattern) and, for mothers only, the required sale facts. Cutting selection stays a code-only flow — no facts added there, per your instruction that cutting content stays distinct/unchanged.
+
+### How it was verified (not just reasoned about)
+
+A local Postgres 16 instance was actually stood up in this session and the full migration applied against real fixture data (including a mother ID with a genuine embedded space, `HY-AH 05`, matching real production data). Every scenario below was executed for real, with captured output, not assumed:
+
+- Genus/plant code uniqueness rejected on duplicate.
+- Invalid code shape (wrong length/case) rejected.
+- Same 3-character plant code reused across two different genera: allowed (uniqueness is per-genus, per your decision).
+- Two cuttings selected **concurrently** (real parallel processes, not sequential calls) from the same never-before-selected mother: exactly one mother SKU allocated, two distinct cutting sequences, mother's `commerce_selected_at` still `null` afterward.
+- Two concurrent calls selecting the **same** mother: converge on exactly one `commerce_skus` row.
+- `UPDATE`/`DELETE` against an in-use `commerce_skus`/`plant_codes`/`genus_codes` row: all rejected by the database itself.
+- A mother selection missing a required fact (`pot_size`): rejected, and the SKU assignment that had already happened earlier in that same call was rolled back too — verified as zero leftover rows, not assumed from the function's structure.
+- `sourceRecordId` (`HY-AH 05`, space preserved exactly) and `sku` (`HY-ABH-01`) demonstrably different values for the same record.
+
+The exact commands are captured in `supabase/commerce_sku_tests.sql` (checked in, re-run against a second fresh database as a reproducibility check before this report was finalized — same results both times) and the JS-level pure-function tests are in `lib/commerce-export.test.ts` (6/6 passing: sourceRecordId≠sku, fail-closed on missing SKU, mixed mother/cutting export, genus/plant code validation).
+
+### Legacy rollout — the one thing I genuinely cannot do myself
+
+I have no credentialed access to the production Supabase database in this session. Before this ships, run this in the Supabase SQL editor and get me (or whoever reviews next) the actual result — I am not guessing or assuming `HY-ICE01-C01` is the only one:
+
+```sql
+select 'cutting' as plant_record_type, cutting_id as source_record_id, commerce_selected_at
+from cuttings
+where commerce_selected_at is not null and commerce_acknowledged_at is null
+union all
+select 'mother', mother_id, commerce_selected_at
+from mother_plants
+where commerce_selected_at is not null and commerce_acknowledged_at is null
+order by commerce_selected_at;
+```
+
+Every row this returns needs a deliberately-assigned SKU (via `select_mother_for_commerce()`/`select_cutting_for_commerce()`, choosing real genus/plant codes for each) as part of rollout, before the new `sku`-resolution behavior goes live — otherwise those specific already-selected records would hit the fail-closed path (no resolvable SKU) the first time `GET /api/commerce/v1/plants` runs post-cutover.
+
+### Explicitly not done in this pass
+
+- **Not committed, not pushed, not deployed.** Per your latest message, only this design report is going to GitHub right now.
+- GM Commerce itself: untouched, as instructed.
+- Etsy: not activated, as instructed.
+- Phase 2 batch processing: not started, as instructed.
+- The checkbox/selection *model* itself wasn't changed beyond what's needed to collect the new required data for one record at a time — no batch-select, no bulk assignment tooling.
+- Genus-code creation UI: deliberately not built this pass (only the two owner-approved codes, `HY`/`AL`, are seeded via migration). Per your instruction not to invent codes speculatively, adding a new genus for now means inserting directly into `genus_codes` (same pattern as every other one-off SQL change this session) until/unless a dedicated screen is actually requested.
