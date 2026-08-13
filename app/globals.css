@@ -330,6 +330,28 @@ label {
   row-gap: var(--label-row-gap);
   padding-top: var(--sheet-margin-top);
   padding-left: var(--sheet-margin-left);
+  /* Screen-only safety net: the zoomed size below is sized to fit a
+     normal browser window, but never let it silently spill past the
+     card's edge (as opposed to visibly/legibly scrolling) if a window
+     is narrower than expected. */
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* One .label-sheet per physical sheet the queue needs (see
+   chunkIntoSheets in lib/labels.ts) -- give each a clear gap on screen
+   and force a real page break before it when printing, so a second
+   sheet starts on its own fresh page instead of wherever the browser's
+   automatic pagination happens to land mid-grid. */
+.label-sheet + .label-sheet {
+  margin-top: 24px;
+}
+
+@media print {
+  .label-sheet + .label-sheet {
+    break-before: page;
+    page-break-before: always;
+  }
 }
 
 .label-cell {
@@ -392,9 +414,13 @@ label {
    reflows layout around it (unlike `transform: scale`), so the queue is
    legible on a normal monitor without changing a single measurement
    that matters at print time -- explicitly reset to 1 below so print
-   output is byte-for-byte the same as before this changed. */
+   output is byte-for-byte the same as before this changed. Kept
+   moderate (not the initial 1.45) plus the max-width/overflow-x above
+   as a belt-and-suspenders pair: this value fits comfortably inside a
+   normal browser window, and the scroll fallback catches any window
+   narrower than that instead of visually overflowing past the card. */
 .label-sheet {
-  zoom: 1.45;
+  zoom: 1.25;
 }
 
 @media print {

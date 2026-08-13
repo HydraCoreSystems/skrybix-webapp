@@ -513,6 +513,40 @@ If a "Hoya Naming Convention Quick Reference Guide" doc isn't in
 Ask the owner before starting on any of these — scope order hasn't been
 confirmed yet.
 
+11. **2026-08-13: fixed a real multi-sheet print-alignment bug, found
+    from the owner asking "what happens if I'm at label 24 and queue 12
+    more?"** Before this, `/labels/mothers` and `/labels/cuttings`
+    rendered the whole queue as one continuous `.label-sheet` CSS grid.
+    The `--sheet-margin-top`/`--sheet-margin-left` offset (the blank
+    space before position 1, confirmed against a real physical test
+    print) was applied only once, at the very start of that grid — so a
+    run overflowing past position 30 would start its second physical
+    page flush against the page edge, misaligned with a fresh blank
+    Avery sheet's real label positions. The UI already warned about
+    overflow but didn't actually print the second sheet correctly.
+    Fixed with `chunkIntoSheets()` (`lib/labels.ts`) + `LabelSheets`
+    (`components/LabelSheets.tsx`): the queue is now split into one
+    chunk per physical sheet — only the first chunk gets leading blank
+    cells (from the start-position picker), every sheet after that
+    starts fresh at position 1 with zero blanks — and each chunk renders
+    as its own `.label-sheet` div, so the margin offset reapplies per
+    sheet and `break-before: page` (`.label-sheet + .label-sheet` in
+    `globals.css`) forces a real page boundary between them. Verified
+    the chunking logic directly (`chunkIntoSheets(12 items, start=24)` →
+    sheet 1 gets 23 blanks + positions 24-30, sheet 2 gets 0 blanks +
+    the remaining 5) before wiring it in.
+
+    Same pass also fixed a real regression from the 2026-08-13 review
+    UI enlargement (previous entry): the `zoom: 1.45` used to make the
+    on-screen label preview legible was wide enough to overflow past the
+    card's right edge on a browser window narrower than ~1260px — the
+    owner caught this from a real screenshot. Reduced to `zoom: 1.25`
+    and added `max-width: 100%; overflow-x: auto` on `.label-sheet` as a
+    belt-and-suspenders fix so any narrower window scrolls horizontally
+    within its own bordered area instead of visually spilling past the
+    card. Print output is unaffected either way — `zoom` is explicitly
+    reset to 1 inside `@media print`.
+
 ## What NOT to do
 
 - Do not replicate the Sheets/Apps Script architecture itself when

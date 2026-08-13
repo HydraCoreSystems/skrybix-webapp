@@ -3,6 +3,7 @@ import { publicPlantUrl, qrDataUri } from "@/lib/qr";
 import { clearMotherPrintQueue } from "../actions";
 import PrintButton from "@/components/PrintButton";
 import LabelStartPicker from "@/components/LabelStartPicker";
+import LabelSheets from "@/components/LabelSheets";
 import { parseStartPosition } from "@/lib/labels";
 import type { MotherPlant } from "@/lib/types";
 
@@ -47,12 +48,11 @@ export default async function MotherLabelsPage({
       ) : (
         <>
           <LabelStartPicker basePath="/labels/mothers" start={start} count={items.length} />
-          <div className="label-sheet">
-            {Array.from({ length: start - 1 }).map((_, i) => (
-              <div className="label-cell" key={`blank-${i}`} />
-            ))}
-            {items.map((item) => (
-              <div className="label-cell" key={item.id}>
+          <LabelSheets
+            items={items}
+            start={start}
+            renderCell={(item) => (
+              <>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img className="qr" src={item.qr} alt="" />
                 <div className="text">
@@ -60,9 +60,9 @@ export default async function MotherLabelsPage({
                   <div className="line">{item.line1}</div>
                   <div className="line">{item.line2}</div>
                 </div>
-              </div>
-            ))}
-          </div>
+              </>
+            )}
+          />
         </>
       )}
     </div>

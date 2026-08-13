@@ -3,6 +3,7 @@ import { CUTTING_INSTAGRAM_URL, qrDataUri } from "@/lib/qr";
 import { clearCuttingPrintQueue } from "../actions";
 import PrintButton from "@/components/PrintButton";
 import LabelStartPicker from "@/components/LabelStartPicker";
+import LabelSheets from "@/components/LabelSheets";
 import { parseStartPosition } from "@/lib/labels";
 import type { Cutting } from "@/lib/types";
 
@@ -48,12 +49,12 @@ export default async function CuttingLabelsPage({
       ) : (
         <>
           <LabelStartPicker basePath="/labels/cuttings" start={start} count={items.length} />
-          <div className="label-sheet">
-            {Array.from({ length: start - 1 }).map((_, i) => (
-              <div className="label-cell cutting" key={`blank-${i}`} />
-            ))}
-            {items.map((item) => (
-              <div className="label-cell cutting" key={item.id}>
+          <LabelSheets
+            items={items}
+            start={start}
+            cellClassName="cutting"
+            renderCell={(item) => (
+              <>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img className="logo" src="/gm-logo.png" alt="" />
                 <div className="text">
@@ -63,9 +64,9 @@ export default async function CuttingLabelsPage({
                 </div>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img className="qr" src={item.qr} alt="" />
-              </div>
-            ))}
-          </div>
+              </>
+            )}
+          />
         </>
       )}
     </div>
