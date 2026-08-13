@@ -24,6 +24,70 @@
   --shadow-md: 0 4px 10px rgba(31, 63, 39, 0.1), 0 2px 4px rgba(31, 63, 39, 0.06);
 }
 
+/* Dark palette, added 2026-08-13 alongside the theme picker in Settings
+   (components/ThemePicker.tsx). Two triggers, same values, same pattern
+   as gm-money-web: the media query covers "System" (data-theme unset),
+   the explicit [data-theme="dark"] selector covers an intentional
+   Settings choice, which must win even when it disagrees with the OS.
+   [data-theme="light"] re-asserts the light values explicitly so a
+   light choice also overrides a dark OS preference in either
+   direction -- do not rely on inheritance/absence for that case. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --green: #4f8f5e;
+    --green-mid: #5a9c68;
+    --green-dark: #16241b;
+    --green-light: rgba(79, 143, 94, 0.18);
+    --bg: #13201a;
+    --card: #1b2620;
+    --border: rgba(255, 255, 255, 0.12);
+    --text: #eef4ee;
+    --muted: #9fb0a4;
+    --red: #e2776f;
+    --red-bg: rgba(226, 119, 111, 0.16);
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --green: #4f8f5e;
+  --green-mid: #5a9c68;
+  --green-dark: #16241b;
+  --green-light: rgba(79, 143, 94, 0.18);
+  --bg: #13201a;
+  --card: #1b2620;
+  --border: rgba(255, 255, 255, 0.12);
+  --text: #eef4ee;
+  --muted: #9fb0a4;
+  --red: #e2776f;
+  --red-bg: rgba(226, 119, 111, 0.16);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --green: #2f5d3a;
+  --green-mid: #3c7249;
+  --green-dark: #1f3f27;
+  --green-light: #e4f3e6;
+  --bg: #f7f5f0;
+  --card: #ffffff;
+  --border: #ddd6c9;
+  --text: #222222;
+  --muted: #666666;
+  --red: #8c2b21;
+  --red-bg: #fbe6e4;
+
+  --shadow-sm: 0 1px 2px rgba(31, 63, 39, 0.06), 0 1px 3px rgba(31, 63, 39, 0.08);
+  --shadow-md: 0 4px 10px rgba(31, 63, 39, 0.1), 0 2px 4px rgba(31, 63, 39, 0.06);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -204,7 +268,7 @@ tbody tr:hover {
    clearly not the primary action, never looks disabled. */
 .btn.secondary {
   background: var(--card);
-  color: var(--green-dark);
+  color: var(--green);
   border: 1.5px solid var(--green);
   box-shadow: none;
 }
@@ -260,7 +324,7 @@ select:focus {
 
 label {
   font-size: 13px;
-  color: #444;
+  color: var(--text);
   display: block;
   margin: 8px 0 3px;
 }
@@ -274,7 +338,7 @@ label {
 
 .flash.success {
   background: var(--green-light);
-  color: #1e5c2a;
+  color: var(--green);
 }
 
 .flash.error {
@@ -404,7 +468,7 @@ label {
    visible while reviewing the queue, without printing an actual border
    onto the label stock. */
 .label-cell {
-  outline: 1px dashed #ccc;
+  outline: 1px dashed var(--border);
 }
 
 /* On-screen review only: the physical label footprint above (2.25in x
@@ -463,7 +527,7 @@ label {
   border-radius: var(--radius-sm);
   text-decoration: none;
   color: var(--text);
-  background: #fff;
+  background: var(--card);
   transition: border-color 0.12s ease, background 0.12s ease;
 }
 
@@ -473,28 +537,43 @@ label {
 }
 
 .picker-cell.used {
-  background: #eee;
-  color: #999;
+  background: var(--bg);
+  color: var(--muted);
 }
 
 .picker-cell.will-print {
   background: var(--green-light);
   border-color: var(--green);
-  color: #1e5c2a;
+  color: var(--green);
   font-weight: 700;
+}
+
+.picker-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin-top: 14px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.picker-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 
 .picker-legend {
   display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  margin: 0 4px 0 10px;
-  vertical-align: middle;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex-shrink: 0;
 }
 
 .picker-legend.used {
-  background: #eee;
+  background: var(--bg);
   border: 1px solid var(--border);
 }
 
@@ -504,7 +583,7 @@ label {
 }
 
 .picker-legend.empty {
-  background: #fff;
+  background: var(--card);
   border: 1px solid var(--border);
 }
 

@@ -29,10 +29,16 @@ export default function LabelStartPicker({
       </label>
       <div className="start-picker-panel">
         <div className="start-picker">{cells}</div>
-        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 10 }}>
-          <span className="picker-legend used" /> already used
-          <span className="picker-legend will-print" /> will print this run
-          <span className="picker-legend empty" /> still blank
+        <div className="picker-legend-row">
+          <span className="picker-legend-item">
+            <span className="picker-legend used" /> already used
+          </span>
+          <span className="picker-legend-item">
+            <span className="picker-legend will-print" /> will print this run
+          </span>
+          <span className="picker-legend-item">
+            <span className="picker-legend empty" /> still blank
+          </span>
         </div>
       </div>
       {overflow && (
