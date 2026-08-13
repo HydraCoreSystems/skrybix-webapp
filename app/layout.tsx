@@ -8,6 +8,12 @@ import { ThemeSync } from "@/components/ThemeSync";
 // on specific routes (see that repo's app/layout.tsx for the full
 // story). A raw <script> in <head> runs synchronously in document
 // order, with no dependency on Next's own script-queueing runtime.
+//
+// Default is 'dark', not 'system' -- the owner is the sole user of this
+// app and explicitly prefers dark, so there's no reason to make him
+// pick it every time a browser's localStorage is empty (a fresh
+// browser/device, or after clearing site data). An explicit System/Light
+// choice in Settings still always wins once one is saved.
 const THEME_BOOTSTRAP_SCRIPT = `
 (() => {
   try {
@@ -15,7 +21,7 @@ const THEME_BOOTSTRAP_SCRIPT = `
     const savedTheme = window.localStorage.getItem(storageKey);
     const theme = savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system'
       ? savedTheme
-      : 'system';
+      : 'dark';
 
     if (theme === 'system') {
       document.documentElement.removeAttribute('data-theme');
@@ -23,7 +29,7 @@ const THEME_BOOTSTRAP_SCRIPT = `
       document.documentElement.setAttribute('data-theme', theme);
     }
   } catch {
-    document.documentElement.removeAttribute('data-theme');
+    document.documentElement.setAttribute('data-theme', 'dark');
   }
 })();
 `;

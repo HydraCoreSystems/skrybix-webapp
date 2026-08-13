@@ -94,7 +94,8 @@ export default async function CuttingsPage({
               </td>
               <td>
                 <CommerceSelectionControl
-                  cuttingId={c.cutting_id}
+                  recordId={c.cutting_id}
+                  kind="cutting"
                   initialState={getCommerceHandoffState(c)}
                 />
               </td>

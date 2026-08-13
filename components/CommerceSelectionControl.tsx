@@ -2,13 +2,16 @@
 
 import { useState } from "react";
 import { selectCuttingForCommerce } from "@/app/cuttings/actions";
+import { selectMotherForCommerce } from "@/app/mothers/actions";
 import type { CommerceHandoffState } from "@/lib/commerce-export";
 
 export function CommerceSelectionControl({
-  cuttingId,
+  recordId,
+  kind,
   initialState,
 }: {
-  cuttingId: string;
+  recordId: string;
+  kind: "cutting" | "mother";
   initialState: CommerceHandoffState;
 }) {
   const [state, setState] = useState(initialState);
@@ -25,7 +28,7 @@ export function CommerceSelectionControl({
 
   async function select() {
     setIsSelecting(true);
-    const result = await selectCuttingForCommerce(cuttingId);
+    const result = kind === "cutting" ? await selectCuttingForCommerce(recordId) : await selectMotherForCommerce(recordId);
     setIsSelecting(false);
     if (!result.ok) {
       setMessage(result.message);

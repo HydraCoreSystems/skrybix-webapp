@@ -5,21 +5,28 @@ It remains the authority for mother-plant and cutting identities.
 
 ## GM Commerce handoff
 
-Skrybix remains the source of truth for cutting identity. In **Cuttings**, a
-human checks **Select for GM Commerce** beside an existing cutting. This
-persists `commerce_selected_at` on that original source record; it does not
-create, modify, or manually re-enter a SKU.
+Skrybix remains the source of truth for cutting **and mother plant**
+identity. In **Cuttings** or **Mother Plants**, a human checks **Select for
+GM Commerce** beside an existing record. This persists `commerce_selected_at`
+on that original source record; it does not create, modify, or manually
+re-enter a SKU.
 
-The existing Skrybix `cutting_id` is the only durable SKU-like identifier
-available for every cutting, so the handoff returns that unchanged value as
-both `sourceRecordId` and `sku`. Skrybix has no separate commerce-SKU field
-and does not generate one for this integration.
+The existing Skrybix `cutting_id`/`mother_id` is the only durable SKU-like
+identifier available for either record type, so the handoff returns that
+unchanged value as both `sourceRecordId` and `sku`. Skrybix has no separate
+commerce-SKU field and does not generate one for this integration.
+
+A mother plant record has no `parentSourceRecordId` (it has no parent in
+Skrybix's own hierarchy, unlike a cutting) and no `archivedAt` (mother plants
+have no archive concept in this schema, only real deletion — `archivedAt` is
+always `null` for a mother record).
 
 ### Access and setup
 
 Apply the updated `supabase/schema.sql` to add the durable selection and
-acknowledgement columns. Set a non-empty `COMMERCE_EXPORT_KEY` in the
-Skrybix deployment environment, using a unique random value such as:
+acknowledgement columns (on both `cuttings` and `mother_plants`). Set a
+non-empty `COMMERCE_EXPORT_KEY` in the Skrybix deployment environment, using
+a unique random value such as:
 
 ```sh
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
@@ -39,8 +46,8 @@ access to GM Commerce other than the documented acknowledgement timestamp.
 
 | Operation | Endpoint | Result |
 | --- | --- | --- |
-| Read pending selections | `GET /api/commerce/v1/plants` | Returns only human-selected, unacknowledged cutting records. |
-| Acknowledge an imported record | `POST /api/commerce/v1/plants/:cuttingId/acknowledge` | Durably marks that selected source record acknowledged. Repeating it is safe. |
+| Read pending selections | `GET /api/commerce/v1/plants` | Returns only human-selected, unacknowledged records — both cutting and mother plant records, mixed in one list distinguished by `plantRecordType`. |
+| Acknowledge an imported record | `POST /api/commerce/v1/plants/:recordId/acknowledge` | Durably marks that selected source record acknowledged, whichever type it is (Skrybix looks it up by trying `cutting_id` then `mother_id` — there is no separate endpoint per type). Repeating it is safe. |
 
 ```json
 {
@@ -61,22 +68,40 @@ access to GM Commerce other than the documented acknowledgement timestamp.
       "acknowledgedAt": null,
       "archivedAt": null,
       "sourceCreatedAt": "2026-08-01T00:00:00.000Z"
+    },
+    {
+      "sourceSystem": "skrybix",
+      "sourceRecordId": "HY-XYZ01",
+      "sku": "HY-XYZ01",
+      "displayName": "Hoya whole-mother example",
+      "parentSourceRecordId": null,
+      "plantRecordType": "mother",
+      "state": "active",
+      "selectionState": "selected",
+      "selectedAt": "2026-08-13T00:00:00.000Z",
+      "acknowledgedAt": null,
+      "archivedAt": null,
+      "sourceCreatedAt": "2026-06-01T00:00:00.000Z"
     }
   ]
 }
 ```
 
 `state` truthfully reports the current source lifecycle: `active`, `sold`, or
-`archived`. It is not marketplace availability or inventory quantity.
-`displayName` is the stored source display name, not a generated listing
-title. The source has no cutting `updated_at`, listing-readiness field,
-price, quantity, photo folder, or marketplace data, so none is inferred.
+`archived` (a mother record's `state` can only ever be `active` or `sold` —
+see the `archivedAt` note above). It is not marketplace availability or
+inventory quantity. `displayName` is the stored source display name, not a
+generated listing title. The source has no `updated_at`, listing-readiness
+field, price, quantity, photo folder, or marketplace data, so none is
+inferred.
 
-GM Commerce must import idempotently on `sourceSystem` plus `sourceRecordId`,
-then call the acknowledgement route after its own durable intake succeeds.
-An acknowledged cutting remains visibly acknowledged in Skrybix but is no
-longer returned by the pending-selection response. There is no callback,
-two-way synchronization, or GM Commerce write access beyond that narrow
-acknowledgement timestamp; GM Commerce owns all downstream commerce state.
+GM Commerce must import idempotently on `sourceSystem` plus `sourceRecordId`
+(unique across both record types — a Cutting_ID and a Mother_ID never
+collide), then call the acknowledgement route after its own durable intake
+succeeds. An acknowledged record remains visibly acknowledged in Skrybix but
+is no longer returned by the pending-selection response. There is no
+callback, two-way synchronization, or GM Commerce write access beyond that
+narrow acknowledgement timestamp; GM Commerce owns all downstream commerce
+state.
 
 GMCOM-003 commerce-selection handoff deployed.

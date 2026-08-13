@@ -547,6 +547,87 @@ confirmed yet.
     card. Print output is unaffected either way — `zoom` is explicitly
     reset to 1 inside `@media print`.
 
+12. **2026-08-13: Light/Dark/System theme support**, ported directly
+    from `gm-money-web`'s proven pattern rather than reinventing it —
+    same synchronous inline bootstrap script in `layout.tsx` (that
+    project found `next/script`'s `beforeInteractive` unreliable on
+    specific routes) plus a defensive `ThemeSync` re-check on mount,
+    both keyed on `localStorage`'s `skrybix-theme`. New Appearance card
+    (`components/ThemePicker.tsx`) on Settings. Every hardcoded color in
+    `globals.css` converted to theme-aware `--token`s, with a dark
+    palette via both the `prefers-color-scheme` media query (System) and
+    explicit `[data-theme]` selectors (an intentional choice always wins
+    over the OS either direction). Caught and fixed a real bug before
+    shipping: `.btn.secondary`'s text referenced `--green-dark`, a
+    near-black green in the dark palette — invisible against the dark
+    card background. Changed to `--green`, tuned for contrast against
+    `--card` in both themes.
+
+    **Default is `dark`, not `system`** — the owner is the sole user of
+    this app and explicitly prefers dark over light once he saw both
+    (2026-08-13: "I love the dark theme setup much better than the light
+    theme"), so there's no reason to make him pick it every time
+    `localStorage` is empty (a fresh browser/device, or cleared site
+    data). An explicit System/Light choice saved in Settings still always
+    wins once one exists. If gm-money-web or hydrocloud-webapp ever get
+    a "pick the app default" conversation, don't assume this same
+    default applies there without asking — this was Skrybix-specific,
+    from Skrybix's actual single-owner usage pattern.
+
+13. **2026-08-13: mother plants can now be listed for sale through GM
+    Commerce, not just cuttings.** The owner asked directly ("What would
+    happen if I wanted to list a mother plant for sale? I don't see a
+    way to do that at present") — confirmed real: the entire handoff
+    was hardcoded to cuttings only (`plantRecordType: "cutting"` was a
+    fixed literal, `mother_plants` had no `commerce_selected_at`/
+    `commerce_acknowledged_at`/`sold` columns, no selection checkbox on
+    the Mothers list). Owner explicitly chose "mirror the cutting flow"
+    over a narrower option when asked.
+
+    Generalized `lib/commerce-export.ts` rather than duplicating it:
+    `CommercePlantRecord.plantRecordType` is now `"cutting" | "mother"`,
+    `parentSourceRecordId` is nullable (`null` for a mother — it has no
+    parent in Skrybix's hierarchy), added `MotherCommerceSource` +
+    `normalizeMotherForCommerce()` mirroring the cutting versions, and
+    `createCommerceExport()` now takes both cuttings and mothers arrays
+    and merges them into one export. `mother_plants` gained
+    `sold`/`commerce_selected_at`/`commerce_acknowledged_at` columns
+    (same pattern as `cuttings`) — **no `archived_at`**, since mother
+    plants have no archive concept in this schema, only real deletion;
+    `MotherCommerceSource.archived_at` is always `null`, never read from
+    the DB (there's no column to read).
+
+    `GET /api/commerce/v1/plants` now queries both tables and merges.
+    `POST /api/commerce/v1/plants/:recordId/acknowledge` (renamed from
+    `:cuttingId` — same URL shape, `cuttingId` was just the wrong name
+    now) tries the `cuttings` table first, then `mother_plants`, since a
+    Cutting_ID and Mother_ID have no shared registry and the only
+    reliable way to know which table an id belongs to is to actually
+    look, not pattern-match the string.
+
+    `components/CommerceSelectionControl.tsx` takes `recordId`/`kind`
+    instead of `cuttingId` now, used identically from both the Cuttings
+    and Mothers list pages. `toggleMotherPrint` was replaced with a
+    generic `toggleMotherField(motherId, field, value)` (mirrors
+    `toggleCuttingField`) so the new `sold` toggle didn't need a second
+    near-duplicate function.
+
+    **This is a cross-system contract change** — `README.md`'s GM
+    Commerce handoff section was updated to match (mixed record types in
+    one list, nullable `parentSourceRecordId`/`archivedAt`, renamed
+    acknowledge param). If/when GM Commerce's own side gets touched,
+    make sure whoever's working on it has read the updated README, not
+    just the code — the shape of what it now receives changed.
+
+    **Deliberately NOT built**: pushing a sold mother plant to
+    `outgoing_log` the way `pushSoldToOutgoingLog()` does for cuttings.
+    The owner only asked about GM Commerce listing capability; selling a
+    whole mother plant is a different inventory event than selling a
+    cutting (the mother leaving the collection entirely vs. a routine
+    cutting sale), and folding it into the same disposal-log workflow
+    wasn't asked for. Revisit if/when the owner actually sells a mother
+    plant and wants that logged somewhere.
+
 ## What NOT to do
 
 - Do not replicate the Sheets/Apps Script architecture itself when

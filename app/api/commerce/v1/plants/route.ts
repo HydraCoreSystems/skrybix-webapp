@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   createCommerceExport,
   isCommerceExportRequestAuthorized,
+  CUTTING_COMMERCE_COLUMNS,
+  MOTHER_COMMERCE_COLUMNS,
   type CuttingCommerceSource,
+  type MotherCommerceSource,
 } from "@/lib/commerce-export";
 import { getSupabaseServerClient } from "@/lib/supabase";
 
@@ -24,21 +27,37 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = getSupabaseServerClient();
-  const { data, error } = await supabase
+
+  const { data: cuttings, error: cuttingsError } = await supabase
     .from("cuttings")
-    .select(
-      "cutting_id,mother_id,full_display_name,sold,archived_at,created_at,commerce_selected_at,commerce_acknowledged_at"
-    )
+    .select(CUTTING_COMMERCE_COLUMNS)
     .not("commerce_selected_at", "is", null)
     .is("commerce_acknowledged_at", null)
     .order("cutting_id");
 
-  if (error) {
-    throw new Error(`Unable to export Skrybix commerce records: ${error.message}`);
+  if (cuttingsError) {
+    throw new Error(`Unable to export Skrybix commerce records: ${cuttingsError.message}`);
   }
 
+  // Whole mother plants can be listed for sale too, added 2026-08-13 --
+  // mother_plants has no archived_at column, so that field is always
+  // null for these records rather than read from the DB (see
+  // MotherCommerceSource in lib/commerce-export.ts).
+  const { data: mothersRaw, error: mothersError } = await supabase
+    .from("mother_plants")
+    .select(MOTHER_COMMERCE_COLUMNS)
+    .not("commerce_selected_at", "is", null)
+    .is("commerce_acknowledged_at", null)
+    .order("mother_id");
+
+  if (mothersError) {
+    throw new Error(`Unable to export Skrybix commerce records: ${mothersError.message}`);
+  }
+
+  const mothers = (mothersRaw ?? []).map((m) => ({ ...m, archived_at: null })) as MotherCommerceSource[];
+
   return NextResponse.json(
-    createCommerceExport((data ?? []) as CuttingCommerceSource[], new Date().toISOString()),
+    createCommerceExport((cuttings ?? []) as CuttingCommerceSource[], mothers, new Date().toISOString()),
     {
       headers: {
         "Cache-Control": "no-store",

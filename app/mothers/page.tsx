@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { CommerceSelectionControl } from "@/components/CommerceSelectionControl";
+import { getCommerceHandoffState } from "@/lib/commerce-export";
 import { getSupabaseServerClient } from "@/lib/supabase";
-import { toggleMotherPrint } from "./actions";
+import { toggleMotherField } from "./actions";
 import { matchesQuery } from "@/lib/search";
 import SearchBox from "@/components/SearchBox";
 import type { MotherPlant } from "@/lib/types";
@@ -53,8 +55,11 @@ export default async function MothersPage({
             <th>Display Name</th>
             <th>Location</th>
             <th>Botanical</th>
+            <th>Sold?</th>
             <th>Print?</th>
+            <th>GM Commerce</th>
             <th>Scans</th>
+            <th></th>
             <th></th>
           </tr>
         </thead>
@@ -70,17 +75,29 @@ export default async function MothersPage({
                 <small>{m.botanical_line2}</small>
               </td>
               <td>
-                <form action={toggleMotherPrint.bind(null, m.mother_id, !m.print_label)}>
+                <form action={toggleMotherField.bind(null, m.mother_id, "sold", !m.sold)}>
+                  <button className={`btn small ${m.sold ? "" : "secondary"}`} type="submit">
+                    {m.sold ? "Sold ✓" : "Mark sold"}
+                  </button>
+                </form>
+              </td>
+              <td>
+                <form action={toggleMotherField.bind(null, m.mother_id, "print_label", !m.print_label)}>
                   <button className={`btn small ${m.print_label ? "" : "secondary"}`} type="submit">
                     {m.print_label ? "Queued ✓" : "Queue for print"}
                   </button>
                 </form>
               </td>
+              <td>
+                <CommerceSelectionControl recordId={m.mother_id} kind="mother" initialState={getCommerceHandoffState(m)} />
+              </td>
               <td>{m.scan_count}</td>
               <td>
                 <Link className="btn small secondary" href={`/mothers/${encodeURIComponent(m.mother_id)}/edit`}>
                   Edit
-                </Link>{" "}
+                </Link>
+              </td>
+              <td>
                 <Link
                   className="btn small secondary"
                   href={`/plant/${encodeURIComponent(m.mother_id)}`}
