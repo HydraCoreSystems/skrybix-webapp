@@ -37,8 +37,8 @@ export default async function EditMotherPage({
         <label>Mother ID (cannot be changed)</label>
         <input type="text" value={mother.mother_id} disabled />
 
-        <label>Display Name</label>
-        <input type="text" name="display_name" defaultValue={mother.display_name} required />
+        <label>Display Name (auto-composed from the naming fields below)</label>
+        <input type="text" value={mother.display_name} disabled />
 
         <label>Location</label>
         <LocationSelect defaultValue={mother.location} />

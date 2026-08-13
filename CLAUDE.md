@@ -144,6 +144,18 @@ commerce handoff above) is built from — getting the derivation wrong or
 seeding the counter wrong risks duplicate/colliding SKUs in a live
 sales channel, not just a display glitch.
 
+**Same day, same root cause: Display Name was also a manually-typed
+required field**, also never something the owner filled in on the
+original sheet. Confirmed against the same real live sheet data pulled
+from Drive: `Display_Name` is just `Botanical_Line1 + " " +
+Botanical_Line2`, with straight quotes instead of the curly quotes used
+on Line2 for printed labels (`composeDisplayName()` in
+`lib/hoya-naming.ts`). `createMother`/`updateMother` now derive it from
+whatever Line1/Line2 actually end up being (including a manual override
+of either, so a deliberate hybrid-cross note carries through instead of
+the two silently diverging) — no separate input on `/mothers/new`
+anymore, shown read-only on the edit page like Mother ID.
+
 - `app/` — Next.js App Router pages + Server Actions (`actions.ts` per
   route group) + API routes for CSV export
 - `lib/supabase.ts` — server-only Supabase client (`SUPABASE_SERVICE_ROLE_KEY`,

@@ -14,14 +14,11 @@ export default async function NewMotherPage({ searchParams }: { searchParams: { 
     <div className="card">
       <h3 style={{ marginTop: 0 }}>Add Mother Plant</h3>
       <p style={{ marginTop: 0 }}>
-        Mother ID is assigned automatically from the species (or, if unidentified, the cultivar/descriptor text
-        below) once you save.
+        Mother ID and Display Name are assigned automatically from the species (or, if unidentified, the
+        cultivar/descriptor text below) once you save.
       </p>
       {searchParams.error && <div className="flash error">{searchParams.error}</div>}
       <form action={createMother}>
-        <label>Display Name</label>
-        <input type="text" name="display_name" required />
-
         <label>Location</label>
         <LocationSelect />
 
