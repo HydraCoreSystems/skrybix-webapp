@@ -3,6 +3,8 @@ import { CommerceSelectionControl } from "@/components/CommerceSelectionControl"
 import { getCommerceHandoffState } from "@/lib/commerce-export";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { toggleCuttingField, pushSoldToOutgoingLog } from "./actions";
+import { matchesQuery } from "@/lib/search";
+import SearchBox from "@/components/SearchBox";
 import type { Cutting } from "@/lib/types";
 
 type CuttingRow = Cutting & { mother_plants: { display_name: string } | null };
@@ -14,7 +16,7 @@ export const revalidate = 0;
 export default async function CuttingsPage({
   searchParams,
 }: {
-  searchParams: { success?: string; error?: string };
+  searchParams: { success?: string; error?: string; q?: string };
 }) {
   const supabase = getSupabaseServerClient();
   const { data: rowsRaw } = await supabase
@@ -22,27 +24,39 @@ export default async function CuttingsPage({
     .select("*, mother_plants(display_name)")
     .is("archived_at", null)
     .order("created_at", { ascending: false });
-  const rows = (rowsRaw ?? []) as CuttingRow[];
+  const allRows = (rowsRaw ?? []) as CuttingRow[];
+  const q = searchParams.q ?? "";
+  const rows = allRows.filter((c) => matchesQuery([c.cutting_id, c.mother_id, c.mother_plants?.display_name], q));
 
   return (
     <div className="card">
       {searchParams.success && <div className="flash success">{searchParams.success}</div>}
       {searchParams.error && <div className="flash error">{searchParams.error}</div>}
-      <h3 style={{ marginTop: 0 }}>Cuttings</h3>
-      <Link className="btn" href="/cuttings/new">
-        + Take Cuttings
-      </Link>{" "}
-      <Link className="btn secondary" href="/api/labels/cuttings.csv">
-        Export queued → CSV
-      </Link>{" "}
-      <Link className="btn secondary" href="/labels/cuttings">
-        View queued labels
-      </Link>{" "}
-      <form className="inline" action={pushSoldToOutgoingLog}>
-        <button className="btn secondary" type="submit">
-          Push Sold → Outgoing Log
-        </button>
-      </form>
+      <div className="page-header">
+        <h3>Cuttings</h3>
+        <div className="actions">
+          <Link className="btn" href="/cuttings/new">
+            + Take Cuttings
+          </Link>
+          <Link className="btn secondary" href="/api/labels/cuttings.csv">
+            Export queued → CSV
+          </Link>
+          <Link className="btn secondary" href="/labels/cuttings">
+            View queued labels
+          </Link>
+          <form className="inline" action={pushSoldToOutgoingLog}>
+            <button className="btn secondary" type="submit">
+              Push Sold → Outgoing Log
+            </button>
+          </form>
+        </div>
+      </div>
+      <SearchBox placeholder="Search by Cutting ID or mother…" defaultValue={q} />
+      {q && (
+        <p className="search-result-count">
+          {rows.length} of {allRows.length} cuttings match "{q}"
+        </p>
+      )}
 
       <table>
         <thead>

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { toggleMotherPrint } from "./actions";
+import { matchesQuery } from "@/lib/search";
+import SearchBox from "@/components/SearchBox";
 import type { MotherPlant } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -10,26 +12,40 @@ export const revalidate = 0;
 export default async function MothersPage({
   searchParams,
 }: {
-  searchParams: { success?: string; error?: string };
+  searchParams: { success?: string; error?: string; q?: string };
 }) {
   const supabase = getSupabaseServerClient();
   const { data: rowsRaw } = await supabase.from("mother_plants").select("*").order("mother_id");
-  const rows = (rowsRaw ?? []) as MotherPlant[];
+  const allRows = (rowsRaw ?? []) as MotherPlant[];
+  const q = searchParams.q ?? "";
+  const rows = allRows.filter((m) =>
+    matchesQuery([m.mother_id, m.display_name, m.location, m.species, m.cultivar, m.botanical_line1, m.botanical_line2], q)
+  );
 
   return (
     <div className="card">
       {searchParams.success && <div className="flash success">{searchParams.success}</div>}
       {searchParams.error && <div className="flash error">{searchParams.error}</div>}
-      <h3 style={{ marginTop: 0 }}>Mother Plants</h3>
-      <Link className="btn" href="/mothers/new">
-        + Add Mother Plant
-      </Link>{" "}
-      <Link className="btn secondary" href="/api/labels/mothers.csv">
-        Export queued → CSV
-      </Link>{" "}
-      <Link className="btn secondary" href="/labels/mothers">
-        View queued labels
-      </Link>
+      <div className="page-header">
+        <h3>Mother Plants</h3>
+        <div className="actions">
+          <Link className="btn" href="/mothers/new">
+            + Add Mother Plant
+          </Link>
+          <Link className="btn secondary" href="/api/labels/mothers.csv">
+            Export queued → CSV
+          </Link>
+          <Link className="btn secondary" href="/labels/mothers">
+            View queued labels
+          </Link>
+        </div>
+      </div>
+      <SearchBox placeholder="Search by ID, name, species, location…" defaultValue={q} />
+      {q && (
+        <p className="search-result-count">
+          {rows.length} of {allRows.length} mother plants match "{q}"
+        </p>
+      )}
       <table>
         <thead>
           <tr>
