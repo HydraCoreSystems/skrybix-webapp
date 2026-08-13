@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { updateMother } from "../../actions";
 import MotherNamingFields from "@/components/MotherNamingFields";
+import LocationSelect from "@/components/LocationSelect";
 import type { MotherPlant } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -40,7 +41,7 @@ export default async function EditMotherPage({
         <input type="text" name="display_name" defaultValue={mother.display_name} required />
 
         <label>Location</label>
-        <input type="text" name="location" defaultValue={mother.location ?? ""} />
+        <LocationSelect defaultValue={mother.location} />
 
         <MotherNamingFields
           defaultValues={{
