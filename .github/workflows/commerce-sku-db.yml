@@ -10,12 +10,12 @@ name: Commerce SKU database verification
 # real concurrent-selection scenarios).
 
 on:
-  push:
-    branches:
-      - claude/commerce-sku-implementation
-    paths:
-      - "supabase/**"
-      - ".github/workflows/commerce-sku-db.yml"
+  # pull_request alone is sufficient while claude/commerce-sku-implementation
+  # has an open PR -- every push to it re-triggers this. A push trigger on
+  # the same branch name would double-run for every commit (confirmed: the
+  # first real run produced two identical `verify`/`app-build-and-test`
+  # pairs). Once this PR merges, a push trigger on `master` would be the
+  # right addition for a future change to these files landing directly.
   pull_request:
     paths:
       - "supabase/**"
@@ -65,7 +65,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # `npm test` (package.json, pre-existing, not introduced by this
+          # PR) is `node --test lib/commerce-export.test.ts` -- it runs the
+          # .ts file directly via Node's native TypeScript support, which
+          # Node 20 does not have. This repo declares no engines/.nvmrc, so
+          # there's no existing pin to match; 22 is the version this was
+          # actually verified against (confirmed failing on 20 in this
+          # workflow's first real run, passing on 22 locally) and is
+          # current Node LTS.
+          node-version: 22
 
       - name: Install dependencies
         run: npm ci
