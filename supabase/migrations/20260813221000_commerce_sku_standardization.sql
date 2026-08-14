@@ -10,16 +10,21 @@
 -- standard supabase/migrations/<timestamp>_<name>.sql layout. Every
 -- statement below is copied verbatim from supabase/schema.sql (which
 -- remains the consolidated reference for a fresh database) and is
--- idempotent (create table if not exists / create or replace function),
--- so running this migration and then re-applying schema.sql is safe
--- either order, and running this migration twice is a no-op the second
--- time.
+-- idempotent -- create table if not exists, create or replace function,
+-- and the RLS/grant/revoke statements at the end are all safe to
+-- re-run -- so running this migration and then re-applying schema.sql
+-- is safe either order, and running this migration twice is a no-op
+-- the second time. Verified in CI (.github/workflows/commerce-sku-db.yml):
+-- fresh schema.sql apply and this migration applied to a simulated
+-- pre-this-PR production database produce a byte-identical resulting
+-- schema, and re-applying this migration a second time is a no-op.
 --
 -- Apply with the Supabase CLI (`supabase db push`) or by hand via
--- `psql $DATABASE_URL -f supabase/migrations/20260813219000_commerce_sku_standardization.sql`.
+-- `psql $DATABASE_URL -f supabase/migrations/20260813221000_commerce_sku_standardization.sql`.
 -- See docs/Skrybix_Commerce_SKU_Design_Report.md for the deployment
 -- order this fits into (schema first, then legacy-inventory SKU
--- backfill, then application code).
+-- backfill -- confirmed not needed for the current production database,
+-- see that doc -- then application code).
 
 -- Commerce SKU standardization -- added 2026-08-13, owner-approved
 -- architecture (see docs/Skrybix_Commerce_SKU_Design_Report.md and the
@@ -431,3 +436,85 @@ begin
   return v_sku;
 end;
 $$;
+
+-- ---------------------------------------------------------------
+-- Access hardening for the new commerce SKU objects.
+--
+-- This app never sends a Supabase anon/publishable key to the browser --
+-- there is no NEXT_PUBLIC_SUPABASE_* anything anywhere in this repo;
+-- every access goes through getSupabaseServerClient() (lib/supabase.ts),
+-- which always uses the service role key. But a Supabase project
+-- provisions every table/function in `public` with default privileges
+-- that grant access to the `anon`/`authenticated` roles too (via
+-- `ALTER DEFAULT PRIVILEGES ... GRANT ... TO anon, authenticated,
+-- service_role`, set up at project creation), and PostgREST
+-- auto-exposes every public table and function as a REST/RPC endpoint
+-- unless that access is explicitly closed off -- independent of whether
+-- this app's own code ever hands out a key that uses those roles.
+-- Verified locally, with Supabase's real default grants reproduced: the
+-- `anon` role could read `commerce_skus`, insert directly into
+-- `genus_codes`, and invoke `select_mother_for_commerce()` -- all
+-- without touching this app's code or its service-role key.
+--
+-- The rest of this schema (mother_plants, cuttings, etc.) has the same
+-- exposure and predates this PR -- that is a real, separate, wider gap,
+-- worth its own repo-wide hardening pass, not something to silently
+-- absorb into this one. This block closes it only for the objects this
+-- PR actually introduces: RLS enabled with zero policies (default-deny
+-- for every role except service_role, which bypasses RLS
+-- unconditionally by Postgres/Supabase design, regardless of policies)
+-- on every new table, and EXECUTE revoked from PUBLIC/anon/authenticated
+-- on every new function, re-granted only to service_role. Guarded so
+-- this still applies cleanly to a bare local/dev Postgres that has none
+-- of Supabase's roles.
+-- ---------------------------------------------------------------
+
+alter table genus_codes enable row level security;
+alter table plant_codes enable row level security;
+alter table commerce_skus enable row level security;
+alter table commerce_mother_seq_counters enable row level security;
+alter table commerce_cutting_seq_counters enable row level security;
+alter table mother_commerce_facts enable row level security;
+
+revoke execute on function next_commerce_mother_seq(character, text) from public;
+revoke execute on function next_commerce_cutting_seq(text) from public;
+revoke execute on function assign_commerce_sku_for_mother(text, character, text) from public;
+revoke execute on function assign_commerce_sku_for_cutting(text, character, text) from public;
+revoke execute on function select_mother_for_commerce(text, character, text, text, text, text, boolean, text, text, text) from public;
+revoke execute on function select_cutting_for_commerce(text, character, text) from public;
+
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'anon') then
+    revoke all on genus_codes, plant_codes, commerce_skus,
+      commerce_mother_seq_counters, commerce_cutting_seq_counters,
+      mother_commerce_facts from anon;
+    revoke execute on function next_commerce_mother_seq(character, text) from anon;
+    revoke execute on function next_commerce_cutting_seq(text) from anon;
+    revoke execute on function assign_commerce_sku_for_mother(text, character, text) from anon;
+    revoke execute on function assign_commerce_sku_for_cutting(text, character, text) from anon;
+    revoke execute on function select_mother_for_commerce(text, character, text, text, text, text, boolean, text, text, text) from anon;
+    revoke execute on function select_cutting_for_commerce(text, character, text) from anon;
+  end if;
+
+  if exists (select 1 from pg_roles where rolname = 'authenticated') then
+    revoke all on genus_codes, plant_codes, commerce_skus,
+      commerce_mother_seq_counters, commerce_cutting_seq_counters,
+      mother_commerce_facts from authenticated;
+    revoke execute on function next_commerce_mother_seq(character, text) from authenticated;
+    revoke execute on function next_commerce_cutting_seq(text) from authenticated;
+    revoke execute on function assign_commerce_sku_for_mother(text, character, text) from authenticated;
+    revoke execute on function assign_commerce_sku_for_cutting(text, character, text) from authenticated;
+    revoke execute on function select_mother_for_commerce(text, character, text, text, text, text, boolean, text, text, text) from authenticated;
+    revoke execute on function select_cutting_for_commerce(text, character, text) from authenticated;
+  end if;
+
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant execute on function next_commerce_mother_seq(character, text) to service_role;
+    grant execute on function next_commerce_cutting_seq(text) to service_role;
+    grant execute on function assign_commerce_sku_for_mother(text, character, text) to service_role;
+    grant execute on function assign_commerce_sku_for_cutting(text, character, text) to service_role;
+    grant execute on function select_mother_for_commerce(text, character, text, text, text, text, boolean, text, text, text) to service_role;
+    grant execute on function select_cutting_for_commerce(text, character, text) to service_role;
+  end if;
+end $$;

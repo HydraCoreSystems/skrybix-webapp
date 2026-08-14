@@ -159,8 +159,11 @@ anymore, shown read-only on the edit page like Mother ID.
 - `app/` — Next.js App Router pages + Server Actions (`actions.ts` per
   route group) + API routes for CSV export
 - `lib/supabase.ts` — server-only Supabase client (`SUPABASE_SERVICE_ROLE_KEY`,
-  never exposed to the browser — no RLS policies needed since nothing
-  queries Supabase client-side)
+  never exposed to the browser). Most tables have no RLS, relying on
+  nothing ever querying Supabase client-side with a non-service-role key
+  — but that alone doesn't block Supabase's own default `anon`/
+  `authenticated` API grants (see the commerce SKU decision record below
+  for why that distinction matters and where RLS actually was added)
 - `lib/csv.ts`, `lib/qr.ts`, `lib/types.ts` — shared helpers
 - `supabase/schema.sql` — full Postgres schema, run once against a real
   Supabase project (see below)
@@ -736,33 +739,63 @@ confirmed yet.
       against a simulated pre-this-change production database and
       confirming byte-identical resulting schema to a fresh
       `schema.sql` apply, plus confirming a second apply is a safe no-op.
-    - **RLS**: deliberately not added. This app has no Row Level Security
-      anywhere in `supabase/schema.sql` — every table is accessed
-      exclusively through `getSupabaseServerClient()`
+    - **RLS/security (final, revised)**: this app has no Row Level
+      Security anywhere else in `supabase/schema.sql` — every table is
+      accessed exclusively through `getSupabaseServerClient()`
       (`lib/supabase.ts`), which always uses the Supabase **service role
-      key**, and the service role bypasses RLS entirely regardless of
-      whether policies exist. Adding RLS policies to only the new tables
-      would be inert (never evaluated by this app's own access pattern)
-      while implying a security boundary that isn't actually enforced
-      anywhere else in the codebase — inventing a new, inconsistent
-      security model for one feature, not closing a real gap. What *is*
-      new: every new `plpgsql` function pins `set search_path = public,
-      pg_temp`, closing the standard Postgres search-path-hijack risk,
-      which is a real hardening step that doesn't require inventing a
-      security model this app doesn't otherwise use.
+      key**, and the service role bypasses RLS unconditionally regardless
+      of whether policies exist. That does **not** make the new objects
+      safe by default: Supabase provisions every project with default
+      privileges granting `anon`/`authenticated` access to everything in
+      `public`, and PostgREST auto-exposes every public table/function as
+      a REST/RPC endpoint unless explicitly closed off — verified locally
+      by reproducing Supabase's real default grants and confirming the
+      `anon` role could read `commerce_skus`, insert into `genus_codes`,
+      and invoke `select_mother_for_commerce()` before this hardening was
+      added. Fix, in `schema.sql`/the migration: RLS **enabled with zero
+      policies** (default-deny for every role except `service_role`) on
+      all six new tables, and `EXECUTE` **revoked from `PUBLIC`/`anon`/
+      `authenticated`, re-granted only to `service_role`**, on all six new
+      callable functions — CI-verified (`anon` denied table read/insert
+      and RPC execute; `service_role` unaffected). Every new `plpgsql`
+      function also pins `set search_path = public, pg_temp`. Deliberately
+      **not** extended to the rest of this schema (`mother_plants`,
+      `cuttings`, etc.), which has the same exposure and predates this PR
+      — a real, separate, wider gap worth its own repo-wide hardening
+      pass, not silently absorbed into this one.
+    - **Acknowledgement discriminator**: the acknowledge endpoint
+      (`POST /api/commerce/v1/plants/:recordId/acknowledge`) now accepts
+      an optional `plantRecordType` (`"cutting"`/`"mother"`) as a query
+      parameter or JSON body field, same URL shape. When supplied, it
+      addresses that table only — the only way to reach a mother whose ID
+      collides with a cutting's, since the original "try cuttings, then
+      mother_plants" heuristic always matches the cutting first. Falls
+      back to that heuristic when omitted, for compatibility with GM
+      Commerce's current integration, which does not send it yet.
+    - **CI**: `.github/workflows/commerce-sku-db.yml` (new) runs
+      `supabase/verify_commerce_sku_migration.sh` against a real
+      `postgres:16` service container on every push/PR — fresh-schema
+      apply, upgrade-path apply, schema parity, migration reapplication,
+      the access-hardening checks above, the full
+      `commerce_sku_tests.sql` suite, and two real concurrent-selection
+      scenarios (distinct mother/cutting SKUs under contention; same-record
+      convergence) — plus `npm test`/`npm run build`. Replaces "a developer
+      manually ran commerce_sku_tests.sql once" with a permanent, repeatable
+      check.
     - **Deployment**: implemented and verified, **deliberately not
       deployed yet** — do not merge/push this until GM Commerce is
-      ready to stop assuming `sourceRecordId === sku` and persist
-      whatever `sku` it receives verbatim. Coordinate the cutover so
-      there's no mixed/ambiguous period where some selected records
-      have the old (source-ID-as-SKU) behavior and some have the new
-      one. **Legacy rollout: resolved (2026-08-13)** — the owner ran the
-      real production legacy-inventory query; it found exactly one
-      already-selected/acknowledged record, `HY-LOB01-C04`, which turned
-      out to be test data (not a real sale) and was deleted from
-      production rather than backfilled. Re-running the query afterward
-      confirmed zero records remain needing a SKU or mother-facts
-      backfill. No pre-deployment backfill step is required.
+      ready to stop assuming `sourceRecordId === sku`, persist whatever
+      `sku` it receives verbatim, use the `plantRecordType` discriminator
+      on acknowledge, and use `motherFacts` for mother listing content.
+      Coordinate the cutover so there's no mixed/ambiguous period where
+      some selected records have the old (source-ID-as-SKU) behavior and
+      some have the new one. **Legacy rollout: resolved (2026-08-13)** —
+      the owner ran the real production legacy-inventory query; it found
+      exactly one already-selected/acknowledged record, `HY-LOB01-C04`,
+      which turned out to be test data (not a real sale) and was deleted
+      from production rather than backfilled. Re-running the query
+      afterward confirmed zero records remain needing a SKU or
+      mother-facts backfill. No pre-deployment backfill step is required.
 
 ## What NOT to do
 
