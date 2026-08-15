@@ -1,5 +1,17 @@
 -- Commerce SKU standardization -- SQL-level test script.
 --
+-- SUPERSEDED, kept for dormant-object regression coverage only. As of
+-- the existing-ID-as-SKU correction, the genus/plant-code
+-- select_mother_for_commerce()/select_cutting_for_commerce() overloads
+-- this file exercises are no longer the ones the application calls --
+-- see supabase/existing_id_commerce_tests.sql for the corrected,
+-- current behavior. EXECUTE on these old overloads is now revoked from
+-- service_role too (supabase/migrations/20260815120000_*.sql), so this
+-- script must be run as the table owner (e.g. `postgres`), NOT as
+-- `set role service_role`, or every call in this file will fail with
+-- "permission denied" -- that failure is itself the intended
+-- dormancy proof; it is not this script being broken.
+--
 -- These are the database-boundary guarantees the owner's decision
 -- record requires (atomicity, concurrency safety, immutability) that
 -- cannot be exercised from lib/commerce-export.test.ts, since they live
@@ -11,9 +23,10 @@
 -- verification; it is NOT meant to run against production (it inserts
 -- throwaway fixture rows with HY-TST/HY-CAR/HY-KRQ/HY-AH ids).
 --
--- Usage: apply supabase/schema.sql first, then this file, then read
--- through the \echo labels and compare actual output to the expected
--- result noted in each comment.
+-- Usage: apply supabase/schema.sql first, then this file (as the table
+-- owner, not service_role -- see above), then read through the \echo
+-- labels and compare actual output to the expected result noted in
+-- each comment.
 
 insert into mother_plants (mother_id, display_name, genus, species) values
   ('HY-CAR01', 'Hoya carnosa', 'Hoya', 'carnosa'),

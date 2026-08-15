@@ -1,49 +1,66 @@
 #!/usr/bin/env bash
 # Permanent CI verification for the commerce SKU standardization system
-# (supabase/schema.sql + supabase/migrations/20260813221000_*.sql).
+# AND the existing-ID-as-SKU correction on top of it
+# (supabase/schema.sql + supabase/migrations/*.sql).
 #
-# This replaces "a developer manually ran commerce_sku_tests.sql once" with
-# a repeatable, scripted check that CI runs on every push/PR. It proves,
+# This replaces "a developer manually ran a SQL script once" with a
+# repeatable, scripted check that CI runs on every push/PR. It proves,
 # against a real Postgres server (not reasoned about on paper):
 #
 #   1. supabase/schema.sql applies cleanly to a fresh database.
-#   2. The forward migration applies cleanly to a database seeded with the
-#      pre-this-PR schema (simulating current production).
-#   3. Both paths produce a byte-identical resulting schema (object parity).
-#   4. Re-applying the migration a second time is a safe no-op.
-#   5. The access-hardening block (RLS + revoked/re-granted execute) blocks
-#      the anon/authenticated roles and leaves service_role fully working,
-#      simulating Supabase's real default-privilege model.
-#   6. supabase/commerce_sku_tests.sql's full functional/negative-path
-#      suite passes as service_role.
-#   7. Two real concurrent processes selecting two cuttings under the same
-#      never-before-selected mother allocate exactly one mother SKU and
-#      two distinct cutting sequences, and never mark the mother selected.
-#   8. Two real concurrent processes selecting the SAME record converge on
-#      exactly one commerce_skus row -- no duplicate SKU, no crash.
-#   9. No orphaned commerce_mother_seq_counters/commerce_cutting_seq_counters
-#      rows or commerce_skus rows are left behind after a deliberately
-#      failed selection (rollback atomicity).
+#   2. The two forward migrations apply cleanly, in order, to a database
+#      seeded with the pre-any-of-this-PR schema (simulating production).
+#   3. Both paths produce a byte-identical resulting schema (parity).
+#   4. Re-applying either migration a second time is a safe no-op.
+#   5. The access-hardening block blocks anon/authenticated and leaves
+#      service_role fully working, simulating Supabase's real
+#      default-privilege model -- for BOTH the original commerce-SKU
+#      objects and the corrected existing-ID-as-SKU overloads.
+#   6. The original commerce_sku_tests.sql suite still passes when run
+#      as the table owner (its genus/plant-code overloads are now
+#      dormant -- EXECUTE was intentionally revoked from service_role).
+#   7. The corrected existing_id_commerce_tests.sql suite passes as
+#      service_role -- exact identity preservation, atomicity,
+#      idempotency, dormancy of the old registry/counter objects, and
+#      that the old overloads are genuinely inaccessible even to
+#      service_role.
+#   8. Two real concurrent processes selecting two cuttings under the
+#      same never-before-selected mother succeed independently (no
+#      shared counter/registry to contend over anymore).
+#   9. Two real concurrent processes selecting the SAME cutting converge
+#      safely -- both return the identical SKU, the record is selected
+#      exactly once.
+#  10. No orphaned commerce_skus/genus_codes/plant_codes/counter rows are
+#      ever created by the corrected selection path.
+#  11. supabase/existing_id_correction_preflight.sql correctly classifies
+#      both the pre-migration (only old signatures) and post-migration
+#      (old+new signatures, old revoked, new service_role-only) states via
+#      its phase_detection row, and fails closed (unexpected_signature_state)
+#      on a state matching neither shape -- without ever calling an RPC.
 #
 # Expects PGHOST/PGPORT/PGUSER/PGPASSWORD to already be set in the
 # environment (standard libpq vars) pointing at a throwaway Postgres
-# server/database this script is free to create/drop databases on -- never
-# point this at anything with real data.
-#
-# Usage: PGHOST=localhost PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres \
-#        ./supabase/verify_commerce_sku_migration.sh
+# server/database this script is free to create/drop databases on --
+# never point this at anything with real data.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCHEMA_SQL="$REPO_ROOT/supabase/schema.sql"
-MIGRATION_SQL="$REPO_ROOT/supabase/migrations/20260813221000_commerce_sku_standardization.sql"
-TESTS_SQL="$REPO_ROOT/supabase/commerce_sku_tests.sql"
+MIGRATION_1_SQL="$REPO_ROOT/supabase/migrations/20260813221000_commerce_sku_standardization.sql"
+MIGRATION_2_SQL="$REPO_ROOT/supabase/migrations/20260815120000_existing_id_as_commerce_sku.sql"
+LEGACY_TESTS_SQL="$REPO_ROOT/supabase/commerce_sku_tests.sql"
+CORRECTION_TESTS_SQL="$REPO_ROOT/supabase/existing_id_commerce_tests.sql"
+PREFLIGHT_SQL="$REPO_ROOT/supabase/existing_id_correction_preflight.sql"
 
 FRESH_DB="skrybix_ci_fresh"
 UPGRADE_DB="skrybix_ci_upgrade"
 CONCURRENCY_DB="skrybix_ci_concurrency"
+LEGACY_FUNCTIONAL_DB="skrybix_ci_legacy_functional"
+CORRECTION_FUNCTIONAL_DB="skrybix_ci_correction_functional"
+PREFLIGHT_PRE_DB="skrybix_ci_preflight_pre"
+PREFLIGHT_UNEXPECTED_DB="skrybix_ci_preflight_unexpected"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -87,14 +104,14 @@ setup_supabase_roles() {
   "
 }
 
-echo "=== [1/9] Fresh schema.sql apply ==="
+echo "=== [1/10] Fresh schema.sql apply ==="
 psql_admin -d postgres -c "drop database if exists $FRESH_DB;"
 psql_admin -d postgres -c "create database $FRESH_DB owner $PGUSER;"
 setup_supabase_roles "$FRESH_DB"
 psql_admin -d "$FRESH_DB" -f "$SCHEMA_SQL"
 pass "schema.sql applied to a fresh database with no errors"
 
-echo "=== [2/9] Upgrade path: pre-PR schema, then forward migration ==="
+echo "=== [2/10] Upgrade path: pre-PR schema, then both forward migrations in order ==="
 psql_admin -d postgres -c "drop database if exists $UPGRADE_DB;"
 psql_admin -d postgres -c "create database $UPGRADE_DB owner $PGUSER;"
 setup_supabase_roles "$UPGRADE_DB"
@@ -105,10 +122,13 @@ git -C "$REPO_ROOT" show origin/master:supabase/schema.sql > "$PRE_PR_SCHEMA" \
 psql_admin -d "$UPGRADE_DB" -f "$PRE_PR_SCHEMA"
 pass "pre-PR (origin/master) schema applied cleanly, simulating current production"
 
-psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_SQL"
-pass "forward migration applied cleanly on top of the simulated-production schema"
+psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_1_SQL"
+pass "commerce-SKU standardization migration applied cleanly"
 
-echo "=== [3/9] Schema object parity between fresh and upgrade paths ==="
+psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_2_SQL"
+pass "existing-ID-as-SKU correction migration applied cleanly on top of it"
+
+echo "=== [3/10] Schema object parity between fresh and upgrade paths ==="
 FRESH_DUMP="$(mktemp)"
 UPGRADE_DUMP="$(mktemp)"
 pg_dump -s -d "$FRESH_DB" --no-owner --no-privileges | grep -v -- '--$' | grep -v '^\\restrict' | grep -v '^\\unrestrict' > "$FRESH_DUMP"
@@ -119,47 +139,69 @@ if ! diff -q "$FRESH_DUMP" "$UPGRADE_DUMP" > /dev/null; then
 fi
 pass "fresh apply and migration-upgraded schema are structurally identical"
 
-echo "=== [4/9] Migration re-apply is a safe no-op ==="
-psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_SQL"
-pass "re-applying the migration a second time produced no errors"
+FRESH_GRANTS=$(psql -d "$FRESH_DB" -tAc "select proname || '|' || pg_get_function_identity_arguments(oid) || '|' || coalesce((select array_agg(grantee::regrole::text order by grantee::regrole::text) from aclexplode(proacl) where privilege_type='EXECUTE'), '{}') from pg_proc where proname in ('select_mother_for_commerce','select_cutting_for_commerce') order by 1;")
+UPGRADE_GRANTS=$(psql -d "$UPGRADE_DB" -tAc "select proname || '|' || pg_get_function_identity_arguments(oid) || '|' || coalesce((select array_agg(grantee::regrole::text order by grantee::regrole::text) from aclexplode(proacl) where privilege_type='EXECUTE'), '{}') from pg_proc where proname in ('select_mother_for_commerce','select_cutting_for_commerce') order by 1;")
+[ "$FRESH_GRANTS" = "$UPGRADE_GRANTS" ] || fail "EXECUTE grants on select_*_for_commerce overloads differ between fresh and upgrade paths"
+pass "EXECUTE grants on both old and new select_*_for_commerce overloads are identical between fresh and upgrade paths"
 
-echo "=== [5/9] Access hardening: anon/authenticated blocked, service_role works ==="
+echo "=== [4/10] Migration re-apply is a safe no-op (both migrations) ==="
+psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_1_SQL"
+psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_2_SQL"
+pass "re-applying both migrations a second time produced no errors"
+
+echo "=== [5/10] Access hardening: anon/authenticated blocked, service_role works (original + corrected objects) ==="
 DENIED_TABLE=$(psql -d "$FRESH_DB" -tAc "set role anon; select count(*) from commerce_skus;" 2>&1 || true)
 echo "$DENIED_TABLE" | grep -qi "permission denied" || fail "anon role was NOT denied read access to commerce_skus"
 pass "anon role denied table read on commerce_skus (RLS with no policies)"
 
-DENIED_INSERT=$(psql -d "$FRESH_DB" -tAc "set role anon; insert into genus_codes (code, genus_name) values ('ZZ','hostile');" 2>&1 || true)
-echo "$DENIED_INSERT" | grep -qi "permission denied" || fail "anon role was NOT denied insert access to genus_codes"
-pass "anon role denied table insert on genus_codes (RLS with no policies)"
+DENIED_NEW_CUTTING=$(psql -d "$FRESH_DB" -tAc "set role anon; select select_cutting_for_commerce('x');" 2>&1 || true)
+echo "$DENIED_NEW_CUTTING" | grep -qi "permission denied" || fail "anon role was NOT denied EXECUTE on the new select_cutting_for_commerce(text)"
+pass "anon role denied EXECUTE on the corrected select_cutting_for_commerce(text)"
 
-DENIED_RPC=$(psql -d "$FRESH_DB" -tAc "set role anon; select select_mother_for_commerce('x','HY','CAR','exact_plant','1','1',true,'ships_in_pot',null,null);" 2>&1 || true)
-echo "$DENIED_RPC" | grep -qi "permission denied" || fail "anon role was NOT denied EXECUTE on select_mother_for_commerce"
-pass "anon role denied EXECUTE on select_mother_for_commerce (revoked from anon/authenticated)"
+DENIED_OLD_CUTTING_SVC=$(psql -d "$FRESH_DB" -tAc "set role service_role; select select_cutting_for_commerce('x','HY','ABC');" 2>&1 || true)
+echo "$DENIED_OLD_CUTTING_SVC" | grep -qi "permission denied" || fail "service_role was NOT denied EXECUTE on the obsolete select_cutting_for_commerce(text,char,text) -- old overload is not dormant"
+pass "service_role denied EXECUTE on the obsolete genus/plant-code select_cutting_for_commerce overload (dormant, not merely unused)"
 
 psql -d "$FRESH_DB" -v ON_ERROR_STOP=1 -tAc "
   set role service_role;
   insert into mother_plants (mother_id, display_name, genus, species) values ('HY-CIACC01','Hoya ci access test','Hoya','testus');
-  insert into plant_codes (genus_code, code, display_label) values ('HY','CIA','CI access test');
-  select select_mother_for_commerce('HY-CIACC01','HY','CIA','exact_plant','6in','18in',true,'ships_in_pot',null,null);
-" > /dev/null || fail "service_role (the app's real access path) was unexpectedly blocked"
-pass "service_role retains full access through the hardening block"
+  select select_mother_for_commerce('HY-CIACC01','exact_plant','6in','18in',true,'ships_in_pot',null,null);
+" > /dev/null || fail "service_role (the app's real access path) was unexpectedly blocked on the corrected select_mother_for_commerce"
+pass "service_role retains full access to the corrected overloads"
 
-echo "=== [6/9] Functional/negative-path suite (supabase/commerce_sku_tests.sql) ==="
-psql_admin -d postgres -c "drop database if exists skrybix_ci_functional;"
-psql_admin -d postgres -c "create database skrybix_ci_functional owner $PGUSER;"
-setup_supabase_roles skrybix_ci_functional
-psql_admin -d skrybix_ci_functional -f "$SCHEMA_SQL"
-# commerce_sku_tests.sql intentionally exercises rejected/error paths
-# (that's the point of the script) so it cannot run under ON_ERROR_STOP;
-# capture output and check for the specific unexpected-failure markers
-# instead of a bare exit code.
-TEST_OUTPUT="$(psql -d skrybix_ci_functional -c "set role service_role;" -f "$TESTS_SQL" 2>&1)"
-echo "$TEST_OUTPUT" | grep -q "leftover_sku_rows" || fail "commerce_sku_tests.sql did not run to completion"
-echo "$TEST_OUTPUT" | grep -A2 "leftover_sku_rows" | tail -1 | grep -qE '^\s*0\s*$' \
+echo "=== [6/10] Legacy functional/negative-path suite (dormant genus/plant-code path, run as table owner) ==="
+psql_admin -d postgres -c "drop database if exists $LEGACY_FUNCTIONAL_DB;"
+psql_admin -d postgres -c "create database $LEGACY_FUNCTIONAL_DB owner $PGUSER;"
+setup_supabase_roles "$LEGACY_FUNCTIONAL_DB"
+psql_admin -d "$LEGACY_FUNCTIONAL_DB" -f "$SCHEMA_SQL"
+# commerce_sku_tests.sql intentionally exercises rejected/error paths, and
+# (as of the correction) must run as the table owner, not service_role --
+# EXECUTE on these obsolete overloads is deliberately revoked from
+# service_role. Capture output and check for the specific markers instead
+# of a bare exit code.
+LEGACY_OUTPUT="$(psql -d "$LEGACY_FUNCTIONAL_DB" -f "$LEGACY_TESTS_SQL" 2>&1)"
+echo "$LEGACY_OUTPUT" | grep -q "leftover_sku_rows" || fail "commerce_sku_tests.sql did not run to completion"
+echo "$LEGACY_OUTPUT" | grep -A2 "leftover_sku_rows" | tail -1 | grep -qE '^\s*0\s*$' \
   || fail "rollback-atomicity check left a leftover commerce_skus row behind"
-pass "commerce_sku_tests.sql ran to completion with the expected rollback-atomicity result"
+pass "commerce_sku_tests.sql (dormant genus/plant-code path) ran to completion as table owner with the expected results"
 
-echo "=== [7/9] Real concurrency: two cuttings under the same never-selected mother ==="
+echo "=== [7/10] Corrected existing_id_commerce_tests.sql suite (service_role) ==="
+psql_admin -d postgres -c "drop database if exists $CORRECTION_FUNCTIONAL_DB;"
+psql_admin -d postgres -c "create database $CORRECTION_FUNCTIONAL_DB owner $PGUSER;"
+setup_supabase_roles "$CORRECTION_FUNCTIONAL_DB"
+psql_admin -d "$CORRECTION_FUNCTIONAL_DB" -f "$SCHEMA_SQL"
+CORRECTION_OUTPUT="$(psql -d "$CORRECTION_FUNCTIONAL_DB" -f "$CORRECTION_TESTS_SQL" 2>&1)"
+echo "$CORRECTION_OUTPUT" | grep -q "HY-ICE01-C100" || fail "existing_id_commerce_tests.sql did not prove C100 identity preservation"
+echo "$CORRECTION_OUTPUT" | grep -q "HY-AH 01-C08" || fail "existing_id_commerce_tests.sql did not prove the embedded-space cutting ID case"
+echo "$CORRECTION_OUTPUT" | grep -A2 "leftover_facts_rows" | tail -1 | grep -qE '^\s*0\s*$' \
+  || fail "failed mother selection left a leftover mother_commerce_facts row behind"
+echo "$CORRECTION_OUTPUT" | grep -A2 "commerce_skus_rows" | tail -1 | grep -qE '^\s*0\s*$' \
+  || fail "corrected selection path wrote a row to the dormant commerce_skus table"
+echo "$CORRECTION_OUTPUT" | grep -c "permission denied for function" | grep -qE '^[4-9][0-9]*$' \
+  || fail "expected at least 4 'permission denied' security assertions in existing_id_commerce_tests.sql output, found fewer"
+pass "existing_id_commerce_tests.sql ran to completion with the expected identity, atomicity, dormancy, and security results"
+
+echo "=== [8/10] Real concurrency: two cuttings under the same never-selected mother (corrected path) ==="
 psql_admin -d postgres -c "drop database if exists $CONCURRENCY_DB;"
 psql_admin -d postgres -c "create database $CONCURRENCY_DB owner $PGUSER;"
 setup_supabase_roles "$CONCURRENCY_DB"
@@ -169,76 +211,93 @@ psql_admin -d "$CONCURRENCY_DB" -c "
   insert into cuttings (cutting_id, mother_id, full_display_name, date_taken) values
     ('HY-CCR01-C01','HY-CCR01','Hoya concurrency test', current_date),
     ('HY-CCR01-C02','HY-CCR01','Hoya concurrency test', current_date);
-  insert into plant_codes (genus_code, code, display_label) values ('HY','CCR','Concurrency test');
 "
-psql -d "$CONCURRENCY_DB" -tAc "set role service_role; select select_cutting_for_commerce('HY-CCR01-C01','HY','CCR');" > /tmp/ccr_out_a.txt 2>&1 &
+psql -d "$CONCURRENCY_DB" -tAc "set role service_role; select select_cutting_for_commerce('HY-CCR01-C01');" > /tmp/ccr_out_a.txt 2>&1 &
 PID_A=$!
-psql -d "$CONCURRENCY_DB" -tAc "set role service_role; select select_cutting_for_commerce('HY-CCR01-C02','HY','CCR');" > /tmp/ccr_out_b.txt 2>&1 &
+psql -d "$CONCURRENCY_DB" -tAc "set role service_role; select select_cutting_for_commerce('HY-CCR01-C02');" > /tmp/ccr_out_b.txt 2>&1 &
 PID_B=$!
 wait "$PID_A" "$PID_B"
 
-# NOTE ON DETERMINISM: these two backgrounded processes are launched as
-# close together as the shell allows, which is the same technique used to
-# manually verify this originally, but the OS scheduler does not guarantee
-# true simultaneous execution on every run. What this step actually proves
-# deterministically -- on every run, race or no race -- is the set of
-# post-condition invariants below: if the ON CONFLICT-based atomicity in
-# assign_commerce_sku_for_mother()/next_commerce_cutting_seq() were ever
-# broken, these invariants would fail regardless of whether this
-# particular run happened to interleave the two calls.
-MOTHER_SKU_COUNT=$(psql -d "$CONCURRENCY_DB" -tAc "select count(*) from commerce_skus where plant_record_type='mother' and source_record_id='HY-CCR01';")
-[ "$MOTHER_SKU_COUNT" -eq 1 ] || fail "expected exactly 1 mother SKU allocated for HY-CCR01, got $MOTHER_SKU_COUNT"
-pass "exactly one mother SKU allocated for the shared mother"
-
-DISTINCT_CUTTING_SKUS=$(psql -d "$CONCURRENCY_DB" -tAc "select count(distinct sku) from commerce_skus where plant_record_type='cutting' and source_record_id in ('HY-CCR01-C01','HY-CCR01-C02');")
-[ "$DISTINCT_CUTTING_SKUS" -eq 2 ] || fail "expected 2 distinct cutting SKUs, got $DISTINCT_CUTTING_SKUS"
-pass "both cuttings received distinct SKUs, no duplicate sequence numbers"
+SKU_A_LINE=$(tail -1 /tmp/ccr_out_a.txt | tr -d '[:space:]')
+SKU_B_LINE=$(tail -1 /tmp/ccr_out_b.txt | tr -d '[:space:]')
+[ "$SKU_A_LINE" = "HY-CCR01-C01" ] || fail "expected select_cutting_for_commerce('HY-CCR01-C01') to return its own exact ID, got '$SKU_A_LINE'"
+[ "$SKU_B_LINE" = "HY-CCR01-C02" ] || fail "expected select_cutting_for_commerce('HY-CCR01-C02') to return its own exact ID, got '$SKU_B_LINE'"
+pass "two cuttings under the same mother, selected concurrently, each returned its own exact ID"
 
 MOTHER_SELECTED=$(psql -d "$CONCURRENCY_DB" -tAc "select commerce_selected_at is not null from mother_plants where mother_id='HY-CCR01';")
 [ "$MOTHER_SELECTED" = "f" ] || fail "mother HY-CCR01 was incorrectly marked selected as a side effect of cutting selection"
-pass "mother was never selected/exported as a side effect of reserving its SKU"
+pass "mother was never selected/exported as a side effect of selecting its cuttings"
 
-echo "=== [8/9] Real concurrency: two concurrent selections of the SAME cutting converge ==="
+echo "=== [9/10] Real concurrency: two concurrent selections of the SAME cutting converge ==="
 psql_admin -d "$CONCURRENCY_DB" -c "
   insert into mother_plants (mother_id, display_name, genus, species) values ('HY-CCR02','Hoya same-record test','Hoya','testus');
   insert into cuttings (cutting_id, mother_id, full_display_name, date_taken) values ('HY-CCR02-C01','HY-CCR02','Hoya same-record test', current_date);
 "
-psql -d "$CONCURRENCY_DB" -tAc "set role service_role; select select_cutting_for_commerce('HY-CCR02-C01','HY','CCR');" > /tmp/ccr_same_a.txt 2>&1 &
+psql -d "$CONCURRENCY_DB" -tAc "set role service_role; select select_cutting_for_commerce('HY-CCR02-C01');" > /tmp/ccr_same_a.txt 2>&1 &
 PID_C=$!
-psql -d "$CONCURRENCY_DB" -tAc "set role service_role; select select_cutting_for_commerce('HY-CCR02-C01','HY','CCR');" > /tmp/ccr_same_b.txt 2>&1 &
+psql -d "$CONCURRENCY_DB" -tAc "set role service_role; select select_cutting_for_commerce('HY-CCR02-C01');" > /tmp/ccr_same_b.txt 2>&1 &
 PID_D=$!
 wait "$PID_C" "$PID_D"
 
-SAME_RECORD_ROWS=$(psql -d "$CONCURRENCY_DB" -tAc "select count(*) from commerce_skus where plant_record_type='cutting' and source_record_id='HY-CCR02-C01';")
-[ "$SAME_RECORD_ROWS" -eq 1 ] || fail "expected exactly 1 commerce_skus row for a record selected concurrently by two callers, got $SAME_RECORD_ROWS"
-pass "two concurrent selections of the same record converged on exactly one commerce_skus row"
+SKU_SAME_A=$(tail -1 /tmp/ccr_same_a.txt | tr -d '[:space:]')
+SKU_SAME_B=$(tail -1 /tmp/ccr_same_b.txt | tr -d '[:space:]')
+[ "$SKU_SAME_A" = "HY-CCR02-C01" ] && [ "$SKU_SAME_B" = "HY-CCR02-C01" ] \
+  || fail "both concurrent callers should observe the identical exact cutting ID (got '$SKU_SAME_A' vs '$SKU_SAME_B')"
+pass "two concurrent selections of the same cutting both observed the identical exact ID"
 
-SKU_A=$(tr -d '[:space:]' < /tmp/ccr_same_a.txt)
-SKU_B=$(tr -d '[:space:]' < /tmp/ccr_same_b.txt)
-[ -n "$SKU_A" ] && [ "$SKU_A" = "$SKU_B" ] || fail "both concurrent callers should observe the identical resulting SKU (got '$SKU_A' vs '$SKU_B')"
-pass "both concurrent callers observed the identical resulting SKU"
+SELECTED_COUNT=$(psql -d "$CONCURRENCY_DB" -tAc "select count(*) from cuttings where cutting_id='HY-CCR02-C01' and commerce_selected_at is not null;")
+[ "$SELECTED_COUNT" -eq 1 ] || fail "expected the cutting to be marked selected exactly once regardless of two concurrent callers"
+pass "the cutting was marked selected exactly once despite two concurrent callers"
 
-echo "=== [9/9] No orphaned rows after a deliberately failed selection ==="
-psql_admin -d "$CONCURRENCY_DB" -c "
-  insert into mother_plants (mother_id, display_name, genus, species) values ('HY-CCR03','x','Hoya','testus');
-  insert into plant_codes (genus_code, code, display_label) values ('HY','CC3','Orphan-row test');
+echo "=== [10/10] No orphaned dormant-object rows after any of the above ==="
+ORPHAN_SKU=$(psql -d "$CONCURRENCY_DB" -tAc "select count(*) from commerce_skus;")
+ORPHAN_PLANT_CODES=$(psql -d "$CONCURRENCY_DB" -tAc "select count(*) from plant_codes;")
+[ "$ORPHAN_SKU" -eq 0 ] || fail "found $ORPHAN_SKU unexpected commerce_skus row(s) after the corrected concurrency scenarios"
+[ "$ORPHAN_PLANT_CODES" -eq 0 ] || fail "found $ORPHAN_PLANT_CODES unexpected plant_codes row(s) after the corrected concurrency scenarios"
+pass "no dormant-object rows were created by any of the corrected selection scenarios above"
+
+echo "=== [11/11] Preflight phase detection: pre-migration, post-migration, and fail-closed on an unexpected state ==="
+# Pre-migration: origin/master schema only (migration 2 not applied yet).
+psql_admin -d postgres -c "drop database if exists $PREFLIGHT_PRE_DB;"
+psql_admin -d postgres -c "create database $PREFLIGHT_PRE_DB owner $PGUSER;"
+setup_supabase_roles "$PREFLIGHT_PRE_DB"
+psql_admin -d "$PREFLIGHT_PRE_DB" -f "$PRE_PR_SCHEMA"
+PRE_PHASE=$(psql -d "$PREFLIGHT_PRE_DB" -tAc "$(cat "$PREFLIGHT_SQL")" | grep '^phase_detection|' | cut -d'|' -f2)
+[ "$PRE_PHASE" = "pre_migration" ] || fail "preflight phase_detection on pre-migration schema returned '$PRE_PHASE', expected 'pre_migration'"
+pass "preflight correctly classifies the pre-migration state (only old signatures) as pre_migration, not an error"
+
+# Post-migration: FRESH_DB already has schema.sql applied, which includes
+# both forward migrations' effect in full (a fresh dump, not an upgrade
+# path) -- reuse it rather than building a third database.
+POST_PHASE=$(psql -d "$FRESH_DB" -tAc "$(cat "$PREFLIGHT_SQL")" | grep '^phase_detection|' | cut -d'|' -f2)
+[ "$POST_PHASE" = "post_migration" ] || fail "preflight phase_detection on fully-corrected schema returned '$POST_PHASE', expected 'post_migration'"
+pass "preflight correctly classifies the post-migration state (old+new signatures, old revoked, new service_role-only) as post_migration"
+
+# Unexpected/fail-closed: take a fully-corrected schema and manually
+# re-grant EXECUTE on an old, supposedly-dormant overload to service_role
+# -- a state that must never be silently accepted as either expected shape.
+psql_admin -d postgres -c "drop database if exists $PREFLIGHT_UNEXPECTED_DB;"
+psql_admin -d postgres -c "create database $PREFLIGHT_UNEXPECTED_DB owner $PGUSER;"
+setup_supabase_roles "$PREFLIGHT_UNEXPECTED_DB"
+psql_admin -d "$PREFLIGHT_UNEXPECTED_DB" -f "$SCHEMA_SQL"
+psql_admin -d "$PREFLIGHT_UNEXPECTED_DB" -c "
+  grant execute on function select_cutting_for_commerce(text, character, text) to service_role;
 "
-psql -d "$CONCURRENCY_DB" -tAc "
-  set role service_role;
-  select select_mother_for_commerce('HY-CCR03','HY','CC3','exact_plant',null,'10in',true,'ships_in_pot',null,null);
-" > /tmp/orphan_attempt.txt 2>&1 || true
-grep -qi "not-null constraint\|violates" /tmp/orphan_attempt.txt || fail "expected the deliberately-invalid selection to fail, it did not"
+UNEXPECTED_PHASE=$(psql -d "$PREFLIGHT_UNEXPECTED_DB" -tAc "$(cat "$PREFLIGHT_SQL")" | grep '^phase_detection|' | cut -d'|' -f2)
+[ "$UNEXPECTED_PHASE" = "unexpected_signature_state" ] || fail "preflight phase_detection on a deliberately-broken grant state returned '$UNEXPECTED_PHASE', expected 'unexpected_signature_state' (fail closed)"
+pass "preflight fails closed (unexpected_signature_state) when the old overload's EXECUTE grant is not actually revoked from service_role"
 
-ORPHAN_SKU=$(psql -d "$CONCURRENCY_DB" -tAc "select count(*) from commerce_skus where source_record_id='HY-CCR03';")
-[ "$ORPHAN_SKU" -eq 0 ] || fail "found $ORPHAN_SKU orphaned commerce_skus row(s) after a failed selection -- rollback atomicity broken"
-ORPHAN_SEQ=$(psql -d "$CONCURRENCY_DB" -tAc "select count(*) from commerce_mother_seq_counters where genus_code='HY' and plant_code='CC3';")
-# The counter row itself is allowed to exist and be incremented (documented,
-# accepted trade-off: a failed downstream step can leave a small sequence
-# gap, never a duplicate/incorrect SKU -- see supabase/schema.sql). What
-# must NOT exist is a commerce_skus row with no matching successful
-# selection, which is already confirmed above.
-echo "counter row present after failed call: $([ "$ORPHAN_SEQ" -gt 0 ] && echo yes || echo no) (expected/documented either way)"
-pass "no orphaned commerce_skus mapping left behind by a failed selection"
+# The preflight file must remain provably read-only -- no statement other
+# than SELECT/WITH may appear (belt-and-suspenders on top of manual review).
+# String literals are stripped BEFORE comments (not the other way around):
+# some of this file's own result strings contain a literal "--" as part of
+# their English text, which would otherwise truncate a naive comment-strip
+# mid-string and leave a spurious "grant"/"do not" fragment exposed.
+PREFLIGHT_STRIPPED=$(sed -E "s/'([^']|'')*'//g" "$PREFLIGHT_SQL" | sed 's/--.*$//')
+if echo "$PREFLIGHT_STRIPPED" | grep -qiE '\b(insert|update|delete|merge|create|alter|drop|grant|revoke|begin|commit|rollback|call)\b|\bdo\s*\$'; then
+  fail "existing_id_correction_preflight.sql appears to contain a non-SELECT statement -- it must remain strictly read-only"
+fi
+pass "existing_id_correction_preflight.sql contains no DML/DDL/RPC/transaction-control keywords"
 
 echo
 echo "=== ALL CHECKS PASSED ==="
@@ -246,4 +305,7 @@ echo "=== ALL CHECKS PASSED ==="
 psql_admin -d postgres -c "drop database if exists $FRESH_DB;"
 psql_admin -d postgres -c "drop database if exists $UPGRADE_DB;"
 psql_admin -d postgres -c "drop database if exists $CONCURRENCY_DB;"
-psql_admin -d postgres -c "drop database if exists skrybix_ci_functional;"
+psql_admin -d postgres -c "drop database if exists $LEGACY_FUNCTIONAL_DB;"
+psql_admin -d postgres -c "drop database if exists $CORRECTION_FUNCTIONAL_DB;"
+psql_admin -d postgres -c "drop database if exists $PREFLIGHT_PRE_DB;"
+psql_admin -d postgres -c "drop database if exists $PREFLIGHT_UNEXPECTED_DB;"

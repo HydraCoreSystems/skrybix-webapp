@@ -10,12 +10,21 @@ name: Commerce SKU database verification
 # real concurrent-selection scenarios).
 
 on:
-  # pull_request alone is sufficient while claude/commerce-sku-implementation
-  # has an open PR -- every push to it re-triggers this. A push trigger on
-  # the same branch name would double-run for every commit (confirmed: the
-  # first real run produced two identical `verify`/`app-build-and-test`
-  # pairs). Once this PR merges, a push trigger on `master` would be the
-  # right addition for a future change to these files landing directly.
+  # push:master is the actual regression gate for changes that land on
+  # master without a matching open PR against a commerce-sku-* branch --
+  # this was missing until now: PR #11 merged without this workflow ever
+  # running against master afterward, since only pull_request was
+  # configured. pull_request stays too, scoped the same way, for PR-time
+  # feedback before merge; a same-commit double-run isn't a concern here
+  # since push:master and pull_request never both fire for the same
+  # commit (a merge commit is a push to master, not a synchronize event
+  # on an open PR).
+  push:
+    branches:
+      - master
+    paths:
+      - "supabase/**"
+      - ".github/workflows/commerce-sku-db.yml"
   pull_request:
     paths:
       - "supabase/**"

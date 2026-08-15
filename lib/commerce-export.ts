@@ -134,30 +134,26 @@ export function getCommercePlantState(record: {
   return record.sold ? "sold" : "active";
 }
 
-// `sku` is looked up from the commerce_skus table (supabase/schema.sql),
-// never derived from or equal to sourceRecordId -- see the 2026-08-13
-// decision record in CLAUDE.md. Fails closed (throws) if a selected
-// record has no assigned SKU rather than falling back to sourceRecordId
-// as a fallback SKU -- under the current select_*_for_commerce() design
-// this should never actually happen (SKU assignment and marking a
-// record selected happen in the same atomic transaction), but the
-// export must never silently paper over it if it somehow does.
-export function normalizeCuttingForCommerce(cutting: CuttingCommerceSource, sku: string | null | undefined): CommercePlantRecord {
+// OWNER DECISION (existing-ID-as-SKU correction): the existing
+// cutting_id IS the commerce SKU, byte-for-byte, always -- never looked
+// up, generated, or derived from a separate table. This is a deliberate
+// reversal of the short-lived genus/plant-code standardized-SKU design
+// (supabase/schema.sql's now-dormant commerce_skus/genus_codes/
+// plant_codes/commerce_*_seq_counters) -- see the correction record in
+// CLAUDE.md and docs/Skrybix_Commerce_SKU_Design_Report.md for why.
+// Preserves embedded spaces/punctuation exactly (e.g. "HY-AH 01-C08")
+// since sku is computed directly from the source field, never
+// re-parsed or reformatted.
+export function normalizeCuttingForCommerce(cutting: CuttingCommerceSource): CommercePlantRecord {
   const selectionState = getCommerceHandoffState(cutting);
   if (selectionState === "unselected" || !cutting.commerce_selected_at) {
     throw new Error(`Cannot export unselected cutting ${cutting.cutting_id}.`);
-  }
-  if (!sku) {
-    throw new Error(
-      `Selected cutting ${cutting.cutting_id} has no assigned commerce SKU -- refusing to export ` +
-        `rather than fall back to the source record ID as a placeholder SKU.`
-    );
   }
 
   return {
     sourceSystem: "skrybix",
     sourceRecordId: cutting.cutting_id,
-    sku,
+    sku: cutting.cutting_id,
     displayName: cutting.full_display_name,
     parentSourceRecordId: cutting.mother_id,
     plantRecordType: "cutting",
@@ -172,25 +168,17 @@ export function normalizeCuttingForCommerce(cutting: CuttingCommerceSource, sku:
 }
 
 // `facts` is looked up from mother_commerce_facts, keyed by mother_id --
-// same fail-closed rule as sku: a selected mother with no recorded facts
-// is refused, not exported with nulls (a legacy mother selected before
-// this table existed needs its facts backfilled during rollout, exactly
-// like the legacy SKU backfill -- see the design report's legacy
-// rollout section).
+// a selected mother with no recorded facts is refused, not exported
+// with nulls. This requirement is unchanged by the existing-ID-as-SKU
+// correction: mother_commerce_facts stays required and active, only the
+// SKU-generation side (genus/plant codes) was removed.
 export function normalizeMotherForCommerce(
   mother: MotherCommerceSource,
-  sku: string | null | undefined,
   facts: MotherCommerceFactsSource | null | undefined
 ): CommercePlantRecord {
   const selectionState = getCommerceHandoffState(mother);
   if (selectionState === "unselected" || !mother.commerce_selected_at) {
     throw new Error(`Cannot export unselected mother plant ${mother.mother_id}.`);
-  }
-  if (!sku) {
-    throw new Error(
-      `Selected mother ${mother.mother_id} has no assigned commerce SKU -- refusing to export ` +
-        `rather than fall back to the source record ID as a placeholder SKU.`
-    );
   }
   if (!facts) {
     throw new Error(
@@ -202,7 +190,7 @@ export function normalizeMotherForCommerce(
   return {
     sourceSystem: "skrybix",
     sourceRecordId: mother.mother_id,
-    sku,
+    sku: mother.mother_id,
     displayName: mother.display_name,
     parentSourceRecordId: null,
     plantRecordType: "mother",
@@ -216,16 +204,9 @@ export function normalizeMotherForCommerce(
   };
 }
 
-// skusByRecordId is keyed by `${plant_record_type}:${source_record_id}`,
-// not source_record_id alone -- mother_id and cutting_id are each only
-// unique within their own table (see the design report's collision-risk
-// section), so a bare source_record_id key could silently overwrite one
-// record's SKU with another's in the (currently theoretical, never
-// DB-enforced against each other) event of a cross-table ID collision.
 export function createCommerceExport(
   cuttings: CuttingCommerceSource[],
   mothers: MotherCommerceSource[],
-  skusByRecordId: Map<string, string>,
   motherFactsByRecordId: Map<string, MotherCommerceFactsSource>,
   retrievedAt: string
 ) {
@@ -236,16 +217,10 @@ export function createCommerceExport(
     records: [
       ...cuttings
         .filter((cutting) => getCommerceHandoffState(cutting) === "selected")
-        .map((cutting) => normalizeCuttingForCommerce(cutting, skusByRecordId.get(`cutting:${cutting.cutting_id}`))),
+        .map((cutting) => normalizeCuttingForCommerce(cutting)),
       ...mothers
         .filter((mother) => getCommerceHandoffState(mother) === "selected")
-        .map((mother) =>
-          normalizeMotherForCommerce(
-            mother,
-            skusByRecordId.get(`mother:${mother.mother_id}`),
-            motherFactsByRecordId.get(mother.mother_id)
-          )
-        ),
+        .map((mother) => normalizeMotherForCommerce(mother, motherFactsByRecordId.get(mother.mother_id))),
     ],
   };
 }

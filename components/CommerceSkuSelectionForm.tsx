@@ -3,34 +3,28 @@
 import { useState } from "react";
 import { selectCuttingForCommerce } from "@/app/cuttings/actions";
 import { selectMotherForCommerce } from "@/app/mothers/actions";
-import { createPlantCode } from "@/app/commerce/actions";
 import type { CommerceHandoffState } from "@/lib/commerce-export";
-import type { GenusCode, PlantCode, PhotoSubject, ShippingPresentation } from "@/lib/commerce-sku";
+import type { PhotoSubject, ShippingPresentation } from "@/lib/commerce-sku";
 
-const NEW_CODE_VALUE = "__new__";
+// OWNER DECISION (existing-ID-as-SKU correction): the record's own
+// mother_id/cutting_id IS the commerce/Shopify SKU -- there is no
+// separate genus/plant-code identity to choose or create here anymore.
+// Selecting a cutting requires only an explicit confirmation; selecting
+// a mother still requires the required sale facts, but no code inputs.
 
 type Props = {
   kind: "cutting" | "mother";
   recordId: string;
   initialState: CommerceHandoffState;
-  sku?: string | null;
-  genusCodes: GenusCode[];
-  plantCodes: PlantCode[];
 };
 
-export function CommerceSkuSelectionForm({ kind, recordId, initialState, sku, genusCodes, plantCodes }: Props) {
+export function CommerceSkuSelectionForm({ kind, recordId, initialState }: Props) {
   const [state, setState] = useState(initialState);
-  const [assignedSku, setAssignedSku] = useState(sku ?? null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const [genusCode, setGenusCode] = useState(genusCodes[0]?.code ?? "");
-  const [plantCodeChoice, setPlantCodeChoice] = useState<string>("");
-  const [newPlantCode, setNewPlantCode] = useState("");
-  const [newPlantLabel, setNewPlantLabel] = useState("");
-
-  // Mother-only required facts (design report §8 / CLAUDE.md decision
+  // Mother-only required facts (design report / CLAUDE.md decision
   // record) -- deliberately never defaulted or inferred, every field
   // here must come from an explicit choice.
   const [photoSubject, setPhotoSubject] = useState<PhotoSubject>("exact_plant");
@@ -42,51 +36,20 @@ export function CommerceSkuSelectionForm({ kind, recordId, initialState, sku, ge
   const [conditionNotes, setConditionNotes] = useState("");
 
   if (state === "acknowledged") {
-    return <span>Received by GM Commerce{assignedSku ? ` (${assignedSku})` : ""}</span>;
+    return <span>Received by GM Commerce ({recordId})</span>;
   }
   if (state === "selected") {
-    return <span>Selected for GM Commerce{assignedSku ? ` (${assignedSku})` : ""}</span>;
-  }
-
-  const plantCodesForGenus = plantCodes.filter((p) => p.genus_code === genusCode);
-
-  async function resolvePlantCode(): Promise<{ code: string; error?: string }> {
-    if (plantCodeChoice === NEW_CODE_VALUE) {
-      const code = newPlantCode.trim().toUpperCase();
-      const label = newPlantLabel.trim();
-      if (!/^[A-Z0-9]{3}$/.test(code)) {
-        return { code: "", error: "Plant code must be exactly 3 uppercase letters/digits." };
-      }
-      if (!label) {
-        return { code: "", error: "Describe what this new plant code identifies." };
-      }
-      const created = await createPlantCode(genusCode, code, label);
-      if (!created.ok) {
-        return { code: "", error: created.message };
-      }
-      return { code };
-    }
-    if (!plantCodeChoice) {
-      return { code: "", error: "Pick or create a plant code first." };
-    }
-    return { code: plantCodeChoice };
+    return <span>Selected for GM Commerce ({recordId})</span>;
   }
 
   async function submit() {
     setBusy(true);
     setMessage(null);
 
-    const { code: plantCode, error: plantCodeError } = await resolvePlantCode();
-    if (plantCodeError) {
-      setBusy(false);
-      setMessage(plantCodeError);
-      return;
-    }
-
     const result =
       kind === "cutting"
-        ? await selectCuttingForCommerce(recordId, genusCode, plantCode)
-        : await selectMotherForCommerce(recordId, genusCode, plantCode, {
+        ? await selectCuttingForCommerce(recordId)
+        : await selectMotherForCommerce(recordId, {
             photoSubject,
             potSize,
             plantSize,
@@ -101,7 +64,6 @@ export function CommerceSkuSelectionForm({ kind, recordId, initialState, sku, ge
       setMessage(result.message);
       return;
     }
-    setAssignedSku(result.sku);
     setState("selected");
   }
 
@@ -116,51 +78,9 @@ export function CommerceSkuSelectionForm({ kind, recordId, initialState, sku, ge
 
   return (
     <div className="card" style={{ padding: 14, margin: 0 }}>
-      <label>Genus</label>
-      <select
-        value={genusCode}
-        onChange={(e) => {
-          setGenusCode(e.target.value);
-          setPlantCodeChoice("");
-        }}
-      >
-        {genusCodes.map((g) => (
-          <option key={g.code} value={g.code}>
-            {g.code} — {g.genus_name}
-          </option>
-        ))}
-      </select>
-
-      <label>Plant code</label>
-      <select value={plantCodeChoice} onChange={(e) => setPlantCodeChoice(e.target.value)}>
-        <option value="">(choose)</option>
-        {plantCodesForGenus.map((p) => (
-          <option key={p.code} value={p.code}>
-            {p.code} — {p.display_label}
-          </option>
-        ))}
-        <option value={NEW_CODE_VALUE}>+ Add new plant code…</option>
-      </select>
-
-      {plantCodeChoice === NEW_CODE_VALUE && (
-        <>
-          <label>New 3-character code</label>
-          <input
-            type="text"
-            value={newPlantCode}
-            onChange={(e) => setNewPlantCode(e.target.value.toUpperCase())}
-            maxLength={3}
-            placeholder="e.g. KRQ"
-          />
-          <label>What identity is this code for?</label>
-          <input
-            type="text"
-            value={newPlantLabel}
-            onChange={(e) => setNewPlantLabel(e.target.value)}
-            placeholder="e.g. Hoya krohniana"
-          />
-        </>
-      )}
+      <p>
+        <strong>Shopify SKU:</strong> {recordId}
+      </p>
 
       {kind === "mother" && (
         <>
