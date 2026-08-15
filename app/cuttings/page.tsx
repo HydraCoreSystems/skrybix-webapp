@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { CommerceSelectionControl } from "@/components/CommerceSelectionControl";
+import { CommerceSkuSelectionForm } from "@/components/CommerceSkuSelectionForm";
 import { getCommerceHandoffState } from "@/lib/commerce-export";
+import { getCommerceCodeOptions } from "@/lib/commerce-codes";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { toggleCuttingField, pushSoldToOutgoingLog } from "./actions";
 import { matchesQuery } from "@/lib/search";
@@ -19,14 +20,35 @@ export default async function CuttingsPage({
   searchParams: { success?: string; error?: string; q?: string };
 }) {
   const supabase = getSupabaseServerClient();
-  const { data: rowsRaw } = await supabase
+  const { data: rowsRaw, error: rowsError } = await supabase
     .from("cuttings")
     .select("*, mother_plants(display_name)")
     .is("archived_at", null)
     .order("created_at", { ascending: false });
+  if (rowsError) {
+    throw new Error(`Unable to load cuttings: ${rowsError.message}`);
+  }
   const allRows = (rowsRaw ?? []) as CuttingRow[];
   const q = searchParams.q ?? "";
   const rows = allRows.filter((c) => matchesQuery([c.cutting_id, c.mother_id, c.mother_plants?.display_name], q));
+
+  const { genusCodes, plantCodes } = await getCommerceCodeOptions();
+
+  const selectedIds = rows.filter((c) => c.commerce_selected_at).map((c) => c.cutting_id);
+  const skusByRecordId = new Map<string, string>();
+  if (selectedIds.length > 0) {
+    const { data: skuRows, error: skuError } = await supabase
+      .from("commerce_skus")
+      .select("source_record_id,sku")
+      .eq("plant_record_type", "cutting")
+      .in("source_record_id", selectedIds);
+    if (skuError) {
+      throw new Error(`Unable to load assigned commerce SKUs: ${skuError.message}`);
+    }
+    for (const row of skuRows ?? []) {
+      skusByRecordId.set(row.source_record_id as string, row.sku as string);
+    }
+  }
 
   return (
     <div className="card">
@@ -93,10 +115,13 @@ export default async function CuttingsPage({
                 </form>
               </td>
               <td>
-                <CommerceSelectionControl
+                <CommerceSkuSelectionForm
                   recordId={c.cutting_id}
                   kind="cutting"
                   initialState={getCommerceHandoffState(c)}
+                  sku={skusByRecordId.get(c.cutting_id)}
+                  genusCodes={genusCodes}
+                  plantCodes={plantCodes}
                 />
               </td>
               <td>{c.scan_count}</td>

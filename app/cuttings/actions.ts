@@ -2,12 +2,8 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import {
-  selectCommerceRecord,
-  type CommerceSelectionActionResult,
-  type CommerceSelectionRepository,
-  type CommerceSelectionSource,
-} from "@/lib/commerce-export";
+import type { CommerceSelectionActionResult } from "@/lib/commerce-export";
+import { validateGenusCode, validatePlantCode } from "@/lib/commerce-sku";
 import { getSupabaseServerClient } from "@/lib/supabase";
 
 export async function createCuttings(formData: FormData) {
@@ -83,53 +79,50 @@ export async function toggleCuttingField(cuttingId: string, field: "sold" | "pri
   }
 }
 
-export async function selectCuttingForCommerce(cuttingId: string): Promise<CommerceSelectionActionResult> {
+// Selecting a cutting for GM Commerce now also assigns its standardized
+// commerce SKU (and, if needed, reserves -- never selects/exports -- its
+// mother's SKU first). Runs through select_cutting_for_commerce()
+// (supabase/schema.sql), one atomic Postgres transaction: SKU assignment
+// and marking the cutting selected either both commit or both roll back.
+// See docs/Skrybix_Commerce_SKU_Design_Report.md for why this can't be
+// safely orchestrated as separate round-trips from here.
+//
+// There is deliberately no motherId parameter -- the RPC derives the
+// cutting's mother from cuttings.mother_id itself, in the database,
+// rather than trusting a value the browser sent. A caller here has no
+// way to make a cutting's commerce SKU get reserved under a mother it
+// doesn't actually belong to.
+export async function selectCuttingForCommerce(
+  cuttingId: string,
+  genusCode: string,
+  plantCode: string
+): Promise<CommerceSelectionActionResult> {
   const normalizedCuttingId = cuttingId.trim();
+  const normalizedGenus = genusCode.trim().toUpperCase();
+  const normalizedPlant = plantCode.trim().toUpperCase();
+
   if (!normalizedCuttingId) {
-    return { ok: false, message: "A cutting ID is required." };
+    return { ok: false, message: "A cutting is required." };
   }
+  const genusError = validateGenusCode(normalizedGenus);
+  if (genusError) return { ok: false, message: genusError };
+  const plantError = validatePlantCode(normalizedPlant);
+  if (plantError) return { ok: false, message: plantError };
 
   const supabase = getSupabaseServerClient();
-  const repository: CommerceSelectionRepository = {
-    async claimUnselected(id, selectedAt) {
-      const { data, error } = await supabase
-        .from("cuttings")
-        .update({ commerce_selected_at: selectedAt })
-        .eq("cutting_id", id)
-        .is("commerce_selected_at", null)
-        .select("cutting_id,commerce_selected_at,commerce_acknowledged_at")
-        .maybeSingle();
+  const { data: sku, error } = await supabase.rpc("select_cutting_for_commerce", {
+    p_cutting_id: normalizedCuttingId,
+    p_genus_code: normalizedGenus,
+    p_plant_code: normalizedPlant,
+  });
 
-      return {
-        record: (data as CommerceSelectionSource | null) ?? null,
-        error: error?.message ?? null,
-      };
-    },
-    async findById(id) {
-      const { data, error } = await supabase
-        .from("cuttings")
-        .select("cutting_id,commerce_selected_at,commerce_acknowledged_at")
-        .eq("cutting_id", id)
-        .maybeSingle();
-
-      return {
-        record: (data as CommerceSelectionSource | null) ?? null,
-        error: error?.message ?? null,
-      };
-    },
-  };
-
-  const result = await selectCommerceRecord(repository, normalizedCuttingId, new Date().toISOString());
-  if (!result.record) {
-    return { ok: false, message: result.error ?? "Could not select cutting for GM Commerce." };
+  if (error || !sku) {
+    return { ok: false, message: error?.message ?? "Could not select cutting for GM Commerce." };
   }
 
   revalidatePath("/cuttings");
-  return {
-    ok: true,
-    state: result.record.commerce_acknowledged_at ? "acknowledged" : "selected",
-    alreadySelected: result.alreadySelected,
-  };
+  revalidatePath("/mothers");
+  return { ok: true, sku: sku as string };
 }
 
 export async function pushSoldToOutgoingLog() {

@@ -34,6 +34,46 @@ export const CUTTING_COMMERCE_COLUMNS =
 export const MOTHER_COMMERCE_COLUMNS =
   "mother_id,display_name,sold,created_at,commerce_selected_at,commerce_acknowledged_at";
 
+// Camel-cased mirror of mother_commerce_facts (supabase/schema.sql) --
+// present (never null) on every exported mother record, always null on
+// cutting records. Required so GM Commerce can produce the
+// intentionally different established-mother sale copy, instead of only
+// ever seeing the same cutting-shaped fields.
+export type MotherCommerceFacts = {
+  photoSubject: "exact_plant" | "representative_plant";
+  potSize: string;
+  plantSize: string;
+  rootedEstablished: boolean;
+  shippingPresentation: "ships_in_pot" | "prepared_other";
+  shippingPresentationDetail: string | null;
+  conditionNotes: string | null;
+};
+
+export type MotherCommerceFactsSource = {
+  photo_subject: "exact_plant" | "representative_plant";
+  pot_size: string;
+  plant_size: string;
+  rooted_established: boolean;
+  shipping_presentation: "ships_in_pot" | "prepared_other";
+  shipping_presentation_detail: string | null;
+  condition_notes: string | null;
+};
+
+export const MOTHER_COMMERCE_FACTS_COLUMNS =
+  "source_record_id,photo_subject,pot_size,plant_size,rooted_established,shipping_presentation,shipping_presentation_detail,condition_notes";
+
+function toMotherCommerceFacts(source: MotherCommerceFactsSource): MotherCommerceFacts {
+  return {
+    photoSubject: source.photo_subject,
+    potSize: source.pot_size,
+    plantSize: source.plant_size,
+    rootedEstablished: source.rooted_established,
+    shippingPresentation: source.shipping_presentation,
+    shippingPresentationDetail: source.shipping_presentation_detail,
+    conditionNotes: source.condition_notes,
+  };
+}
+
 export type CommercePlantRecord = {
   sourceSystem: "skrybix";
   sourceRecordId: string;
@@ -49,44 +89,29 @@ export type CommercePlantRecord = {
   acknowledgedAt: string | null;
   archivedAt: string | null;
   sourceCreatedAt: string;
+  // Always null for a cutting. Always a real object for a mother -- see
+  // normalizeMotherForCommerce, which fails closed (throws) rather than
+  // exporting a selected mother with no recorded facts.
+  motherFacts: MotherCommerceFacts | null;
 };
 
 // Selection/acknowledgement bookkeeping only -- deliberately has no id
 // field. The concrete id column differs by source table (cutting_id vs
-// mother_id) and nothing in the generic selection flow below ever needs
-// to read it back off the record, so dropping it lets both cuttings and
-// mothers share this type and selectCommerceRecord() as-is.
+// mother_id), and this is only used for reading current state (has this
+// been selected/acknowledged yet), not for driving the actual selection
+// action anymore -- that now goes through the atomic
+// select_mother_for_commerce()/select_cutting_for_commerce() Postgres
+// functions (supabase/schema.sql), not a JS-orchestrated claim.
 export type CommerceSelectionSource = {
   commerce_selected_at: string | null;
   commerce_acknowledged_at: string | null;
 };
 
-export type CommerceSelectionRepository = {
-  claimUnselected: (
-    id: string,
-    selectedAt: string
-  ) => Promise<{ record: CommerceSelectionSource | null; error: string | null }>;
-  findById: (id: string) => Promise<{ record: CommerceSelectionSource | null; error: string | null }>;
-};
-
-export type CommerceSelectionResult =
-  | {
-      record: CommerceSelectionSource;
-      alreadySelected: boolean;
-      error: null;
-    }
-  | {
-      record: null;
-      alreadySelected: false;
-      error: string;
-    };
-
-// Return shape for the two Server Actions (selectCuttingForCommerce,
-// selectMotherForCommerce) that wrap selectCommerceRecord() below for a
-// specific table -- shared here so both actions files and
-// CommerceSelectionControl.tsx agree on one type.
+// Return shape for the Server Actions that wrap the select_*_for_commerce
+// RPCs -- shared here so both actions files and the selection form
+// component agree on one type.
 export type CommerceSelectionActionResult =
-  | { ok: true; state: "selected" | "acknowledged"; alreadySelected: boolean }
+  | { ok: true; sku: string }
   | { ok: false; message: string };
 
 export function getCommerceHandoffState(record: CommerceSelectionSource): CommerceHandoffState {
@@ -109,16 +134,30 @@ export function getCommercePlantState(record: {
   return record.sold ? "sold" : "active";
 }
 
-export function normalizeCuttingForCommerce(cutting: CuttingCommerceSource): CommercePlantRecord {
+// `sku` is looked up from the commerce_skus table (supabase/schema.sql),
+// never derived from or equal to sourceRecordId -- see the 2026-08-13
+// decision record in CLAUDE.md. Fails closed (throws) if a selected
+// record has no assigned SKU rather than falling back to sourceRecordId
+// as a fallback SKU -- under the current select_*_for_commerce() design
+// this should never actually happen (SKU assignment and marking a
+// record selected happen in the same atomic transaction), but the
+// export must never silently paper over it if it somehow does.
+export function normalizeCuttingForCommerce(cutting: CuttingCommerceSource, sku: string | null | undefined): CommercePlantRecord {
   const selectionState = getCommerceHandoffState(cutting);
   if (selectionState === "unselected" || !cutting.commerce_selected_at) {
     throw new Error(`Cannot export unselected cutting ${cutting.cutting_id}.`);
+  }
+  if (!sku) {
+    throw new Error(
+      `Selected cutting ${cutting.cutting_id} has no assigned commerce SKU -- refusing to export ` +
+        `rather than fall back to the source record ID as a placeholder SKU.`
+    );
   }
 
   return {
     sourceSystem: "skrybix",
     sourceRecordId: cutting.cutting_id,
-    sku: cutting.cutting_id,
+    sku,
     displayName: cutting.full_display_name,
     parentSourceRecordId: cutting.mother_id,
     plantRecordType: "cutting",
@@ -128,19 +167,42 @@ export function normalizeCuttingForCommerce(cutting: CuttingCommerceSource): Com
     acknowledgedAt: cutting.commerce_acknowledged_at,
     archivedAt: cutting.archived_at,
     sourceCreatedAt: cutting.created_at,
+    motherFacts: null,
   };
 }
 
-export function normalizeMotherForCommerce(mother: MotherCommerceSource): CommercePlantRecord {
+// `facts` is looked up from mother_commerce_facts, keyed by mother_id --
+// same fail-closed rule as sku: a selected mother with no recorded facts
+// is refused, not exported with nulls (a legacy mother selected before
+// this table existed needs its facts backfilled during rollout, exactly
+// like the legacy SKU backfill -- see the design report's legacy
+// rollout section).
+export function normalizeMotherForCommerce(
+  mother: MotherCommerceSource,
+  sku: string | null | undefined,
+  facts: MotherCommerceFactsSource | null | undefined
+): CommercePlantRecord {
   const selectionState = getCommerceHandoffState(mother);
   if (selectionState === "unselected" || !mother.commerce_selected_at) {
     throw new Error(`Cannot export unselected mother plant ${mother.mother_id}.`);
+  }
+  if (!sku) {
+    throw new Error(
+      `Selected mother ${mother.mother_id} has no assigned commerce SKU -- refusing to export ` +
+        `rather than fall back to the source record ID as a placeholder SKU.`
+    );
+  }
+  if (!facts) {
+    throw new Error(
+      `Selected mother ${mother.mother_id} has no recorded commerce sale facts -- refusing to export ` +
+        `rather than send GM Commerce a record it cannot render correctly.`
+    );
   }
 
   return {
     sourceSystem: "skrybix",
     sourceRecordId: mother.mother_id,
-    sku: mother.mother_id,
+    sku,
     displayName: mother.display_name,
     parentSourceRecordId: null,
     plantRecordType: "mother",
@@ -150,12 +212,21 @@ export function normalizeMotherForCommerce(mother: MotherCommerceSource): Commer
     acknowledgedAt: mother.commerce_acknowledged_at,
     archivedAt: mother.archived_at,
     sourceCreatedAt: mother.created_at,
+    motherFacts: toMotherCommerceFacts(facts),
   };
 }
 
+// skusByRecordId is keyed by `${plant_record_type}:${source_record_id}`,
+// not source_record_id alone -- mother_id and cutting_id are each only
+// unique within their own table (see the design report's collision-risk
+// section), so a bare source_record_id key could silently overwrite one
+// record's SKU with another's in the (currently theoretical, never
+// DB-enforced against each other) event of a cross-table ID collision.
 export function createCommerceExport(
   cuttings: CuttingCommerceSource[],
   mothers: MotherCommerceSource[],
+  skusByRecordId: Map<string, string>,
+  motherFactsByRecordId: Map<string, MotherCommerceFactsSource>,
   retrievedAt: string
 ) {
   return {
@@ -163,8 +234,18 @@ export function createCommerceExport(
     sourceSystem: "skrybix" as const,
     retrievedAt,
     records: [
-      ...cuttings.filter((cutting) => getCommerceHandoffState(cutting) === "selected").map(normalizeCuttingForCommerce),
-      ...mothers.filter((mother) => getCommerceHandoffState(mother) === "selected").map(normalizeMotherForCommerce),
+      ...cuttings
+        .filter((cutting) => getCommerceHandoffState(cutting) === "selected")
+        .map((cutting) => normalizeCuttingForCommerce(cutting, skusByRecordId.get(`cutting:${cutting.cutting_id}`))),
+      ...mothers
+        .filter((mother) => getCommerceHandoffState(mother) === "selected")
+        .map((mother) =>
+          normalizeMotherForCommerce(
+            mother,
+            skusByRecordId.get(`mother:${mother.mother_id}`),
+            motherFactsByRecordId.get(mother.mother_id)
+          )
+        ),
     ],
   };
 }
@@ -182,28 +263,4 @@ export function isCommerceExportRequestAuthorized(
   return (
     suppliedToken.length === expectedToken.length && timingSafeEqual(suppliedToken, expectedToken)
   );
-}
-
-export async function selectCommerceRecord(
-  repository: CommerceSelectionRepository,
-  id: string,
-  selectedAt: string
-): Promise<CommerceSelectionResult> {
-  const claimed = await repository.claimUnselected(id, selectedAt);
-  if (claimed.error) {
-    return { record: null, alreadySelected: false, error: claimed.error };
-  }
-  if (claimed.record) {
-    return { record: claimed.record, alreadySelected: false, error: null };
-  }
-
-  const existing = await repository.findById(id);
-  if (existing.error) {
-    return { record: null, alreadySelected: false, error: existing.error };
-  }
-  if (!existing.record) {
-    return { record: null, alreadySelected: false, error: "Unknown record." };
-  }
-
-  return { record: existing.record, alreadySelected: true, error: null };
 }

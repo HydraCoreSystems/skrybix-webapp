@@ -159,8 +159,11 @@ anymore, shown read-only on the edit page like Mother ID.
 - `app/` — Next.js App Router pages + Server Actions (`actions.ts` per
   route group) + API routes for CSV export
 - `lib/supabase.ts` — server-only Supabase client (`SUPABASE_SERVICE_ROLE_KEY`,
-  never exposed to the browser — no RLS policies needed since nothing
-  queries Supabase client-side)
+  never exposed to the browser). Most tables have no RLS, relying on
+  nothing ever querying Supabase client-side with a non-service-role key
+  — but that alone doesn't block Supabase's own default `anon`/
+  `authenticated` API grants (see the commerce SKU decision record below
+  for why that distinction matters and where RLS actually was added)
 - `lib/csv.ts`, `lib/qr.ts`, `lib/types.ts` — shared helpers
 - `supabase/schema.sql` — full Postgres schema, run once against a real
   Supabase project (see below)
@@ -627,6 +630,172 @@ confirmed yet.
     cutting sale), and folding it into the same disposal-log workflow
     wasn't asked for. Revisit if/when the owner actually sells a mother
     plant and wants that logged somewhere.
+
+14. **2026-08-13 DECISION RECORD — plant source identity and commercial
+    SKU are separate, immutable concepts.** Full design rationale in
+    `docs/Skrybix_Commerce_SKU_Design_Report.md`; this is the durable
+    summary. Owner-approved architecture, implemented and verified
+    against a real local Postgres instance, **not yet deployed** — see
+    "deployment" below.
+
+    - `Mother_ID`/`Cutting_ID` (the existing `mother_plants.mother_id`/
+      `cuttings.cutting_id` primary keys) are **permanent, opaque source
+      identities** — never renamed, never regex-normalized, never
+      touched by anything in this feature. Real IDs may contain a space
+      (`HY-AH 05` etc.) and must stay exactly as-is. This is
+      non-negotiable specifically because mother QR codes are printed
+      with the literal current `mother_id` baked into the image on
+      physical labels already in circulation (`lib/qr.ts`) — changing
+      one would 404 every already-printed QR code with no way to
+      reissue history.
+    - A **separate, additive, immutable commercial SKU** is assigned
+      per record: `{GENUS}-{PLANT}-{MOTHER}` for a mother,
+      `{GENUS}-{PLANT}-{MOTHER}-C{CUTTING}` for a cutting. `GENUS` is 2
+      uppercase letters, `PLANT` is 3 uppercase letters/digits, both
+      from controlled registries (`genus_codes`/`plant_codes`,
+      `supabase/schema.sql`) — never derived by slicing a name. Approved
+      initial codes: `HY` = Hoya, `AL` = Alocasia. **Do not add further
+      genus codes speculatively** — add one deliberately, in
+      `genus_codes`, only when a plant of that genus is actually about
+      to be sold.
+    - SKUs are assigned **atomically at first GM Commerce selection**,
+      not at record creation — `select_mother_for_commerce()`/
+      `select_cutting_for_commerce()` (`supabase/schema.sql`), each one
+      Postgres function body (one transaction). Selecting a cutting
+      whose mother has no SKU yet **reserves** the mother's SKU first —
+      this never selects, exports, or acknowledges the mother as a side
+      effect; that stays a separate, explicit human action. Verified
+      live under real concurrency (two cuttings selected simultaneously
+      from the same never-before-selected mother → exactly one mother
+      SKU, two distinct cutting sequences, mother still unselected
+      afterward) and for rollback atomicity (a failed mother-facts
+      validation rolls back the SKU assignment that happened earlier in
+      the same call, leaving zero rows behind).
+    - Immutability is **database-enforced**, not just "no application
+      code updates it": a trigger rejects any `UPDATE` **or `DELETE`** on
+      `commerce_skus` outright (a delete-then-reinsert would otherwise be
+      an easy way to silently "reassign" a SKU that already left this
+      system in an export), and real foreign keys from `commerce_skus` to
+      `genus_codes`/`plant_codes` mean a registry code already used in
+      an assigned SKU can't be renamed or deleted — Postgres refuses
+      automatically, no extra trigger needed for that part. All of this
+      was verified against a real local Postgres 16 instance (not
+      reasoned about on paper) — see `supabase/commerce_sku_tests.sql`
+      for the reproducible script and the implementation report for full
+      output.
+    - `sourceRecordId` (GM Commerce API) is still the permanent Skrybix
+      ID, used for acknowledgement and idempotent import, exactly as
+      before. `sku` is now looked up from `commerce_skus`, never equal
+      to `sourceRecordId` by construction. `normalizeCuttingForCommerce`/
+      `normalizeMotherForCommerce` (`lib/commerce-export.ts`) **fail
+      closed** — throw rather than export a selected record with no
+      resolvable SKU (or, for a mother, no recorded sale facts) — instead
+      of ever falling back to `sourceRecordId` as a placeholder SKU or
+      exporting facts as null.
+    - `commerce_skus`' real identity is the **composite**
+      `(plant_record_type, source_record_id)`, not `source_record_id`
+      alone (mother_id and cutting_id are each only unique within their
+      own table). Every lookup — the GET export's SKU map, the
+      acknowledge route's `lookupSku()` — is keyed/filtered on both
+      fields, not just `source_record_id`, so a hypothetical cross-table
+      ID collision can never overwrite or mis-resolve the wrong record's
+      SKU.
+    - A cutting's mother is **always derived from `cuttings.mother_id`
+      inside the database** (`assign_commerce_sku_for_cutting()`,
+      `select_cutting_for_commerce()`), never trusted from a
+      caller-supplied parameter — the RPC/Server Action signatures do not
+      even accept a mother ID argument for cutting selection anymore.
+      Both `select_mother_for_commerce()`/`select_cutting_for_commerce()`
+      also verify the target record actually exists and that their
+      `UPDATE` genuinely marked it selected (or was already selected —
+      idempotent re-calls are fine), raising rather than returning a
+      SKU silently if neither is true. Re-selecting an already-assigned
+      record under a *different* genus/plant code is also rejected
+      outright (SKUs are immutable, so this can't be silently ignored or
+      silently reassigned).
+    - **Required mother-sale facts**, collected at first mother
+      selection, never inferred from `plantRecordType="mother"` and
+      never read from the general `notes` field: sale-photo subject
+      (exact plant vs. representative), pot size, approximate
+      plant/vine size, rooted/established confirmation, shipping
+      presentation (ships in pot vs. prepared another way, with a
+      required detail when the latter). Optional but exportable:
+      condition/recent-cutback notes. `mother_commerce_facts`
+      (`supabase/schema.sql`) enforces the required ones as real
+      `NOT NULL`/`CHECK` columns (including the `prepared_other`-requires-
+      detail rule, enforced by a table `CHECK`, not just client-side/RPC
+      validation), not just client-side validation. Quantity is locked to
+      `1` at the database level (a selected mother record is always
+      exactly one whole plant) — revisit only if Phil later approves a
+      different model. Cutting selection does **not** collect these
+      facts — cutting content stays as it was. These facts are now
+      **exported to GM Commerce** too (`CommercePlantRecord.motherFacts`,
+      camelCased, always populated for a mother record and always `null`
+      for a cutting) — not just collected and left unused.
+    - **Migration**: a real forward-only, timestamped migration file
+      (`supabase/migrations/20260813221000_commerce_sku_standardization.sql`)
+      exists alongside the consolidated `supabase/schema.sql` (which
+      remains the fresh-database reference) — verified by applying it
+      against a simulated pre-this-change production database and
+      confirming byte-identical resulting schema to a fresh
+      `schema.sql` apply, plus confirming a second apply is a safe no-op.
+    - **RLS/security (final, revised)**: this app has no Row Level
+      Security anywhere else in `supabase/schema.sql` — every table is
+      accessed exclusively through `getSupabaseServerClient()`
+      (`lib/supabase.ts`), which always uses the Supabase **service role
+      key**, and the service role bypasses RLS unconditionally regardless
+      of whether policies exist. That does **not** make the new objects
+      safe by default: Supabase provisions every project with default
+      privileges granting `anon`/`authenticated` access to everything in
+      `public`, and PostgREST auto-exposes every public table/function as
+      a REST/RPC endpoint unless explicitly closed off — verified locally
+      by reproducing Supabase's real default grants and confirming the
+      `anon` role could read `commerce_skus`, insert into `genus_codes`,
+      and invoke `select_mother_for_commerce()` before this hardening was
+      added. Fix, in `schema.sql`/the migration: RLS **enabled with zero
+      policies** (default-deny for every role except `service_role`) on
+      all six new tables, and `EXECUTE` **revoked from `PUBLIC`/`anon`/
+      `authenticated`, re-granted only to `service_role`**, on all six new
+      callable functions — CI-verified (`anon` denied table read/insert
+      and RPC execute; `service_role` unaffected). Every new `plpgsql`
+      function also pins `set search_path = public, pg_temp`. Deliberately
+      **not** extended to the rest of this schema (`mother_plants`,
+      `cuttings`, etc.), which has the same exposure and predates this PR
+      — a real, separate, wider gap worth its own repo-wide hardening
+      pass, not silently absorbed into this one.
+    - **Acknowledgement discriminator**: the acknowledge endpoint
+      (`POST /api/commerce/v1/plants/:recordId/acknowledge`) now accepts
+      an optional `plantRecordType` (`"cutting"`/`"mother"`) as a query
+      parameter or JSON body field, same URL shape. When supplied, it
+      addresses that table only — the only way to reach a mother whose ID
+      collides with a cutting's, since the original "try cuttings, then
+      mother_plants" heuristic always matches the cutting first. Falls
+      back to that heuristic when omitted, for compatibility with GM
+      Commerce's current integration, which does not send it yet.
+    - **CI**: `.github/workflows/commerce-sku-db.yml` (new) runs
+      `supabase/verify_commerce_sku_migration.sh` against a real
+      `postgres:16` service container on every push/PR — fresh-schema
+      apply, upgrade-path apply, schema parity, migration reapplication,
+      the access-hardening checks above, the full
+      `commerce_sku_tests.sql` suite, and two real concurrent-selection
+      scenarios (distinct mother/cutting SKUs under contention; same-record
+      convergence) — plus `npm test`/`npm run build`. Replaces "a developer
+      manually ran commerce_sku_tests.sql once" with a permanent, repeatable
+      check.
+    - **Deployment**: implemented and verified, **deliberately not
+      deployed yet** — do not merge/push this until GM Commerce is
+      ready to stop assuming `sourceRecordId === sku`, persist whatever
+      `sku` it receives verbatim, use the `plantRecordType` discriminator
+      on acknowledge, and use `motherFacts` for mother listing content.
+      Coordinate the cutover so there's no mixed/ambiguous period where
+      some selected records have the old (source-ID-as-SKU) behavior and
+      some have the new one. **Legacy rollout: resolved (2026-08-13)** —
+      the owner ran the real production legacy-inventory query; it found
+      exactly one already-selected/acknowledged record, `HY-LOB01-C04`,
+      which turned out to be test data (not a real sale) and was deleted
+      from production rather than backfilled. Re-running the query
+      afterward confirmed zero records remain needing a SKU or
+      mother-facts backfill. No pre-deployment backfill step is required.
 
 ## What NOT to do
 

@@ -1,279 +1,267 @@
-# Skrybix Commerce SKU Standardization — Design Report
+# Skrybix Commerce SKU Standardization — Final Design & Implementation Record
 
-**Date:** 2026-08-13
-**Status:** See "Implementation status" addendum at the end of this document for the current state — this file started as a design-only report and has since been updated as the design was reviewed and approved.
-**Scope:** Answers the 12 requested points + the mother-plant content-semantics gap inventory + the material-conflict check, against the current `master` branch (post-PR #9).
+**Status as of this revision:** implemented, committed, pushed, open as a **draft** pull request (#11) against `master` on branch `claude/commerce-sku-implementation`. **Not merged. Not deployed. Not production-enabled.** No code path in production calls any function or reads any table this document describes.
 
----
-
-## Material-conflict check (answered first, since it gates everything else)
-
-**No material conflict, under one condition: the new SKU must be a wholly separate field from `Mother_ID`/`Cutting_ID`, never a replacement for them.** This matches your mid-turn decision exactly, and it's not just the safer reading — it's the only one that doesn't break something already live:
-
-**`mother_plants` QR codes are printed with the literal current `mother_id` string baked in**, not a lookup key that could be repointed. `lib/qr.ts`:
-```ts
-export function publicPlantUrl(motherId: string): string {
-  return `${siteUrl()}/plant/${encodeURIComponent(motherId)}`;
-}
-```
-This URL is what's actually encoded into the QR image on every physical mother label already printed and possibly already stuck to a pot. If `mother_id` ever changed for an existing row, every already-printed QR code for that plant would 404 permanently — there's no way to reissue history. (Cutting QR codes are safe by comparison — they encode a fixed Instagram URL directly, not an ID-based link, per a deliberate fix from 2026-07-25.)
-
-Given that, the only architecture that carries zero risk to QR codes, printed labels, the `cuttings.mother_id`/`outgoing_log.cutting_id` foreign keys, and acknowledgement history is: **`Mother_ID`/`Cutting_ID` stay exactly as they are today, forever, for every existing and future row. The new standardized SKU lives in a new, separate, additive table**, looked up by `source_record_id`, never replacing the primary key. Everything below is designed around that.
+This is the single authoritative document for this feature. Earlier drafts of this report existed as a design-only proposal, then accumulated dated "addendum" sections as the implementation, a blocking review, and a production data check each landed. This revision replaces all of that with one document reflecting only the final state — no superseded schema, no "still open" owner decision that has since been resolved. Where prior history matters (why a decision was made a certain way), it's noted in place, not left as a separate correction layered on top.
 
 ---
 
-## 1. Current Mother_ID and Cutting_ID generation code
+## 1. What this is and why
 
-**Mother_ID** — `lib/mother-id.ts:12-19`:
-```ts
-export function deriveSpec3(species, cultivar): string | null {
-  const source = (species && species.trim()) || (cultivar && cultivar.trim()) || null;
-  if (!source) return null;
-  return source.slice(0, 3).toUpperCase();
-}
-export function buildMotherId(spec3: string, seq: number): string {
-  return `HY-${spec3}${String(seq).padStart(2, "0")}`;
-}
-```
-Called from `app/mothers/actions.ts:34-58` (`createMother`), which reserves `seq` via `next_mother_seq()` (`supabase/schema.sql:92-104`, atomic UPSERT on `mother_id_counters (spec3, next_seq)`).
+Skrybix's `mother_plants`/`cuttings` tables use `Mother_ID`/`Cutting_ID` as both primary key and, historically, the value handed to GM Commerce as a product identifier. That conflates two different concerns: a permanent internal source identity, and a customer-facing, standardized product SKU. This document describes the fix: a new, separate, additive `sku` concept, and the reasoning, schema, and guarantees behind it.
 
-**Cutting_ID** — `app/cuttings/actions.ts:48-51`:
-```ts
-cutting_id: `${motherId}-C${String(seq).padStart(2, "0")}`,
-```
-`seq` reserved via `next_cutting_seq()` (`supabase/schema.sql:117-129`, atomic UPSERT on `mother_cutting_counters (mother_id, next_seq)`).
+## 2. Owner decisions (final, all resolved)
 
-**Neither ever changes after creation** — no `UPDATE` statement anywhere touches either column; the mother edit page renders the ID in a `disabled` input with no `name` attribute (`app/mothers/[motherId]/edit/page.tsx:38`), so it's structurally excluded from the update form payload.
+These were decided across two "OWNER DECISION(S)" reviews and are treated as settled, not open:
 
-## 2. Everything that depends on current IDs
+- `Mother_ID` and `Cutting_ID` are **permanent source identities** and are never renamed or rewritten, for any reason, ever. Printed mother QR codes contain the literal `mother_id` (`lib/qr.ts`, `publicPlantUrl(motherId)`) baked into already-distributed physical labels — changing that value would 404 every already-printed QR code with no way to reissue history. Cutting QR codes encode a fixed Instagram URL, not an ID-based link, so they carry no equivalent risk, but `Cutting_ID` is held to the same never-rewritten rule for consistency and because `outgoing_log.cutting_id` and `cuttings.mother_id` are real foreign keys.
+- Commerce SKU is a **separate, additive, immutable, globally unique** identifier, looked up by `(plantRecordType, sourceRecordId)`, never a replacement for the source ID.
+- **SKU format:** `{GENUS}-{PLANT}-{MOTHER}[-C{CUTTING}]`. Examples: `HY-KRQ-01`, `HY-KRQ-02`, `HY-KRQ-02-C01`, `AL-FRY-01`.
+- Genus codes are a **deliberate, human-curated registry**, never sliced from a name. Approved codes today: `HY` (Hoya), `AL` (Alocasia). No further genus codes are added speculatively.
+- Plant-code uniqueness is scoped **per genus** (`unique (genus_code, code)`) — the same 3-character code can be reused across two different genera without colliding, since the full SKU always prefixes with `GENUS-`.
+- SKU assignment happens **at first commerce selection**, not at record creation — most mother/cutting rows are inventory bookkeeping that never gets sold, and forcing a registry-curation step on every new row would add real friction to daily entry for no payoff.
+- Selecting a cutting **reserves** its mother's SKU if the mother doesn't have one yet, without ever selecting or exporting the mother as a side effect — that stays a separate, explicit human action.
+- Source identity is collision-safe as the **composite** `(plantRecordType, sourceRecordId)` — `mother_id` and `cutting_id` are each only unique within their own table, not against each other, so a bare `source_record_id` key or lookup filter is not safe (see §4 for the schema, §6 for exactly where this is enforced in application code).
+- Mother and cutting listing semantics differ: cuttings export as before (no facts payload); a selected mother additionally carries a required, structured `motherFacts` payload (§7) that a cutting export never has.
+- **Etsy activation and Phase 2 batch processing are explicitly out of scope** for this PR and have not been touched.
 
-| Dependent | Where |
-|---|---|
-| `mother_plants.mother_id` | Primary key (`supabase/schema.sql:30`) |
-| `cuttings.cutting_id` | Primary key (`supabase/schema.sql:133`) |
-| `cuttings.mother_id` | FK → `mother_plants(mother_id)` (`:135`) |
-| `mother_cutting_counters.mother_id` | FK → `mother_plants(mother_id)` (`:110`) |
-| `outgoing_log.cutting_id` | FK → `cuttings(cutting_id)` (`:181`) |
-| **Mother QR codes (printed, physical)** | `lib/qr.ts:9-11`, `publicPlantUrl(mother_id)` → baked into already-printed labels |
-| Public mother page routing | `app/plant/[motherId]/page.tsx` — dynamic route param **is** `mother_id`, used directly in `.eq("mother_id", params.motherId)` and `increment_mother_scan_count` |
-| Cutting public-page safety net | `app/plant/cutting/[cuttingId]/page.tsx` — legacy redirect only, keyed on `cutting_id` |
-| Printed label text | `components/LabelSheets.tsx` renders `item.id` (= `mother_id`/`cutting_id`) as the literal printed identifier on the physical label |
-| Label CSV exports | `app/api/labels/mothers.csv/route.ts:23`, `app/api/labels/cuttings.csv/route.ts:24` — both emit the raw ID |
-| Cutting-creation form | `app/cuttings/new/page.tsx:22-25` — mother picker `<select>` uses `mother_id` as the option value |
-| GM Commerce acknowledgement | `app/api/commerce/v1/plants/[recordId]/acknowledge/route.ts` — looks up by `cutting_id`/`mother_id` directly (this stays true under the new design — acknowledgement is keyed on `sourceRecordId`, i.e. the existing ID, never the new SKU, matching your mid-turn decision) |
-| Tests | `lib/commerce-export.test.ts` uses ID-shaped strings (`HY-ABC01-C01` etc.) as fixture data, not asserting on format itself |
+## 3. Material-conflict check
 
-No test currently asserts on the `HY-{spec3}{seq}` shape as a hard contract — the tests exercise the selection/export *logic*, not the ID *format*. That's good news: adding a parallel SKU system needs zero test rewrites here, only new tests for the new pieces.
+Confirmed no material conflict, under exactly the condition already baked into every decision above: the SKU is a wholly separate field, never a replacement for `Mother_ID`/`Cutting_ID`. `mother_plants` QR codes are printed with the literal current `mother_id` baked into the image on physical labels already in circulation — that is the hard constraint everything else in this design is built around, and nothing in the implementation touches it. No `UPDATE` statement anywhere in this codebase writes to `mother_id` or `cutting_id` after row creation; the mother edit form renders the ID in a `disabled` input with no `name` attribute, structurally excluded from the update payload.
 
-## 3. Current data inventory, legacy/unusual IDs, cross-table collision risk
+## 4. Schema (final, as implemented)
 
-All 147 real mother plants confirmed to date use the `HY-{spec3}{seq}` shape or an earlier, less consistent hand-typed variant (e.g. `HY-AH 01`, `HY-AH001`, `HY-AH201`, `HY-CV 01`, `HY-SS 01` — all pre-automation, `spec3` values with embedded spaces or digit suffixes that don't match the current deterministic derivation rule at all). These were never migrated to the current scheme and remain exactly as entered.
-
-**Confirmed real embedded-space case**: `deriveSpec3(null, "AH Black Magic")` → `"AH "` (verified by executing the actual function this session, not inferred) → `buildMotherId("AH ", 5)` → `"HY-AH 05"`. This is why rule 7's "do not regex-reject" instruction is correct as written — a naive validator would reject real, valid, already-in-production data.
-
-**Cross-table collision risk**: `mother_id` and `cutting_id` are each a `PRIMARY KEY` only within their own table — Postgres does not enforce uniqueness across the two. In practice, every `cutting_id` carries a `-C##` suffix that `buildMotherId` never produces on its own, so no real collision has occurred — but this is an emergent property of the two generator functions, not a schema-enforced guarantee. This applies to the *existing* ID scheme; the *new* SKU scheme (see §5) will get real, enforced global uniqueness via a database `UNIQUE` constraint, which the legacy scheme never had.
-
-## 4. Proposed genus-code and plant-code registry schema
+Delivered two ways, kept in sync and CI-verified to be identical (§9):
+- `supabase/schema.sql` — the consolidated, fresh-database reference (this repo's pre-existing convention).
+- `supabase/migrations/20260813221000_commerce_sku_standardization.sql` — a new, real, timestamped forward migration (Supabase CLI convention: `supabase/migrations/<timestamp>_<name>.sql`), for applying to the already-populated production database. This is the first file in that directory; every statement in it is copied verbatim from `schema.sql` and is idempotent, so either file can be applied in either order safely, and re-applying the migration a second time is a no-op (CI-verified, §9).
 
 ```sql
 create table genus_codes (
-  code        char(2) primary key,        -- e.g. 'HY', 'AL'
-  genus_name  text not null unique,       -- e.g. 'Hoya', 'Alocasia'
+  code        char(2) primary key check (code = upper(code)),
+  genus_name  text not null unique,
   created_at  timestamptz not null default now()
 );
+-- Seeded: ('HY','Hoya'), ('AL','Alocasia'). Not extended speculatively.
 
 create table plant_codes (
   id            bigint generated always as identity primary key,
   genus_code    char(2) not null references genus_codes(code),
-  code          text not null check (code ~ '^[A-Z0-9]{3}$'),  -- e.g. 'KRQ', 'FRY'
-  display_label text not null,   -- free-text identity description the operator
-                                  -- assigned this code to (species, cultivar name,
-                                  -- or a descriptive label for an unidentified plant)
+  code          text not null check (code = upper(code) and code ~ '^[A-Z0-9]{3}$'),
+  display_label text not null,
   created_at    timestamptz not null default now(),
   unique (genus_code, code)
 );
-```
 
-**Uniqueness scope — flagged as an owner decision (see §12):** I've scoped `plant_codes.code` unique *per genus* (`unique (genus_code, code)`), not globally, since the full SKU always prefixes with `GENUS-`, so `HY-KRQ-01` and `AL-KRQ-01` can never actually collide as full SKUs even if `KRQ` is reused across genera. This halves the registry-curation burden (a 3-character code space per genus, not shared across all genera). If you'd rather have `plant_codes.code` be globally unique regardless of genus (simpler mental model, more collision pressure on a small 3-character/36^3 space), that's a one-line constraint change — flagging it now rather than assuming.
-
-Deliberately **no auto-generation function** for either code — matches rule 2/9 ("do not generate it blindly," "controlled registry," "manually resolved").
-
-## 5. Proposed commerce-SKU allocation mechanism, with concurrency handling
-
-```sql
 create table commerce_skus (
-  source_record_id   text primary key,        -- existing mother_id or cutting_id, UNCHANGED
-  plant_record_type  text not null check (plant_record_type in ('mother', 'cutting')),
-  sku                text not null unique,      -- the new standardized, immutable identifier
-  assigned_at        timestamptz not null default now()
+  id                bigint generated always as identity primary key,
+  plant_record_type text not null check (plant_record_type in ('mother', 'cutting')),
+  source_record_id  text not null,             -- existing mother_id or cutting_id, UNCHANGED
+  genus_code        char(2) not null references genus_codes(code),
+  plant_code        text not null,
+  mother_seq        int not null,
+  cutting_seq       int,                        -- null for mothers, required for cuttings
+  sku               text not null unique,
+  assigned_at       timestamptz not null default now(),
+  unique (plant_record_type, source_record_id), -- the real composite identity
+  foreign key (genus_code, plant_code) references plant_codes (genus_code, code),
+  check (
+    (plant_record_type = 'mother' and cutting_seq is null) or
+    (plant_record_type = 'cutting' and cutting_seq is not null)
+  )
 );
 
--- Per (genus_code, plant_code): atomic mother-sequence counter, same proven
--- pattern as next_mother_seq()/next_cutting_seq() already in this codebase.
 create table commerce_mother_seq_counters (
-  genus_code char(2) not null,
-  plant_code text not null,
-  next_seq   int not null default 1,
+  genus_code char(2) not null, plant_code text not null, next_seq int not null default 1,
   primary key (genus_code, plant_code)
 );
-
-create or replace function next_commerce_mother_seq(p_genus char(2), p_plant text)
-returns int language plpgsql as $$
-declare v_seq int;
-begin
-  insert into commerce_mother_seq_counters (genus_code, plant_code, next_seq)
-  values (p_genus, p_plant, 2)
-  on conflict (genus_code, plant_code) do update
-    set next_seq = commerce_mother_seq_counters.next_seq + 1
-  returning next_seq - 1 into v_seq;
-  return v_seq;
-end;
-$$;
-
--- Per mother SKU: atomic cutting-sequence counter, restarts at C01 per mother.
 create table commerce_cutting_seq_counters (
-  mother_sku text primary key,
-  next_seq   int not null default 1
+  mother_sku text primary key, next_seq int not null default 1
 );
--- next_commerce_cutting_seq(p_mother_sku) follows the identical pattern.
+-- next_commerce_mother_seq()/next_commerce_cutting_seq(): identical
+-- INSERT ... ON CONFLICT ... DO UPDATE ... RETURNING pattern already
+-- proven by the pre-existing next_mother_seq()/next_cutting_seq().
+
+create table mother_commerce_facts (
+  source_record_id             text primary key references mother_plants(mother_id),
+  photo_subject                text not null check (photo_subject in ('exact_plant', 'representative_plant')),
+  pot_size                     text not null,
+  plant_size                   text not null,
+  rooted_established           boolean not null,
+  shipping_presentation        text not null check (shipping_presentation in ('ships_in_pot', 'prepared_other')),
+  shipping_presentation_detail text,
+  condition_notes               text,
+  quantity                     int not null default 1 check (quantity = 1),
+  recorded_at                  timestamptz not null default now(),
+  check (shipping_presentation <> 'prepared_other' or coalesce(trim(shipping_presentation_detail), '') <> '')
+);
 ```
 
-Concurrency handling is the exact same single-statement `INSERT ... ON CONFLICT ... DO UPDATE ... RETURNING` pattern already proven and live in this codebase for `next_mother_seq`/`next_cutting_seq` — no new concurrency primitive needed, just the same shape applied to two more counters.
+**Identity design note:** `commerce_skus` uses a surrogate `id` primary key plus `unique (plant_record_type, source_record_id)`, not a bare `source_record_id primary key`. An early draft of this schema used the bare form; the owner corrected it, since `mother_id`/`cutting_id` are each only unique within their own table, not against each other (§2).
 
-`commerce_skus.sku unique` is a real database constraint — unlike the legacy ID scheme, global SKU uniqueness (mothers and cuttings together) is actually enforced here, not just emergent.
+## 5. RPC / transaction flow
 
-## 6. Proposed legacy backfill/mapping plan
+Two top-level entry points, each **one Postgres function body — one transaction**:
 
-**Recommended: lazy, on-demand backfill — not a blanket upfront migration.** Assign a `commerce_skus` row the first time a record is selected for GM Commerce (see §7 for why that's the safest trigger point), not retroactively for all ~147+ existing mothers and their cuttings. Rationale:
+- **`select_mother_for_commerce(mother_id, genus_code, plant_code, photo_subject, pot_size, plant_size, rooted_established, shipping_presentation, shipping_presentation_detail, condition_notes) returns sku`**
+  1. Verifies the mother exists (`raise exception` if not).
+  2. Calls `assign_commerce_sku_for_mother()` (below).
+  3. Inserts `mother_commerce_facts` (`on conflict do nothing` — idempotent).
+  4. `UPDATE mother_plants SET commerce_selected_at = now() WHERE ... AND commerce_selected_at IS NULL`, then checks `row_count` via `GET DIAGNOSTICS`: zero rows is only acceptable if the mother was *already* selected (idempotent re-call); otherwise raises.
+  5. All of the above commits or rolls back together.
 
-- Rule 2 requires *deliberate*, human-reviewed genus/plant code assignment — that's real operator time, not a script. Forcing it for every historical record before shipping anything would mean curating dozens of plant-identity codes for plants that may never be sold, for no benefit.
-- Nothing needs a SKU until it's actually offered for sale. `GET /api/commerce/v1/plants` only ever returns *selected* records — a record that's never been selected never needs to appear there, so it never needs a SKU.
-- No legacy ID is touched either way (§ material-conflict check) — this plan only concerns the *new, additive* table.
+- **`select_cutting_for_commerce(cutting_id, genus_code, plant_code) returns sku`**
+  1. Verifies the cutting exists (`raise exception` if not). **There is no `mother_id` parameter** — the cutting's mother is always derived from `cuttings.mother_id` inside the database, never trusted from a caller-supplied value. A caller cannot cause a cutting's commerce SKU to be reserved under a mother it doesn't actually belong to, because there is nothing left to spoof.
+  2. Calls `assign_commerce_sku_for_cutting()` (below), which internally reserves the mother's SKU first via `assign_commerce_sku_for_mother()` — that inner call only ever writes to `commerce_skus`, never to `mother_plants.commerce_selected_at`/`commerce_acknowledged_at`, so a mother is never selected or exported as a side effect of one of its cuttings being selected.
+  3. Same `UPDATE ... GET DIAGNOSTICS` selected-or-already-selected check as above.
 
-**One real exception to flag:** at least one cutting (`HY-ICE01-C01`, seen in an earlier screenshot) is already selected/queued in the *current* (source-ID-only) commerce pipeline. Under the new scheme it would need its SKU assigned as part of rollout, not lazily, since it's already mid-flight. This is a small, explicit, bounded case — worth a one-time manual check of "what's currently selected but not yet acknowledged" before flipping the switch, not a general backfill.
+`assign_commerce_sku_for_mother()`/`assign_commerce_sku_for_cutting()` are both:
+- **Idempotent** — a repeat call for an already-assigned identity returns the existing SKU without allocating a new sequence number. CI-verified (§9): calling `select_mother_for_commerce()` twice with the same identity and inputs leaves the sequence counter unchanged and returns the identical SKU both times.
+- **Fail-closed on mismatch** — a repeat call for an already-assigned identity with a *different* genus/plant code raises explicitly rather than silently keeping the old assignment or silently reassigning it (SKUs are immutable, so neither silent behavior is safe).
+- **Existence-checked** — raise if the target mother/cutting row doesn't exist.
+- Sequence reservation (`next_commerce_mother_seq`/`next_commerce_cutting_seq`) and the `commerce_skus` insert are both inside the same function body, so a failure anywhere downstream (e.g. the mother-facts `NOT NULL` violation) rolls back the SKU assignment too — CI-verified: zero leftover `commerce_skus` rows after a deliberately failed selection.
 
-No alias/mapping table beyond `commerce_skus` itself is needed — it already *is* the legacy-ID-to-SKU mapping (`source_record_id → sku`), serving double duty.
+**Documented, accepted trade-off:** under a genuine race where two callers both pass the "not yet assigned" check before either inserts, both reserve a real sequence number via `next_commerce_*_seq`, but only one insert wins (`ON CONFLICT DO NOTHING`) — the loser's number is simply never reused. This can produce small gaps in the sequence under real concurrency, never a duplicate or incorrect SKU. This is the same trade-off already accepted by the pre-existing `next_mother_seq()`/`next_cutting_seq()`, not a new risk.
 
-## 7. Should `sourceRecordId` and `sku` be separated without changing existing primary IDs?
+**Immutability**, database-enforced, not just "no application code touches it": a `BEFORE UPDATE OR DELETE` trigger (`forbid_commerce_sku_mutation()`) unconditionally rejects both mutating operations on `commerce_skus`. Real foreign key columns (`genus_code`, `plant_code`) mean Postgres itself refuses to rename or delete a registry code already referenced by an assigned SKU — no extra trigger needed for that part. CI-verified (§9): both `UPDATE` and `DELETE` against an assigned row rejected; `UPDATE`/`DELETE` against an in-use `plant_codes`/`genus_codes` row rejected by the FK.
 
-**Yes, and — genuinely good news — the API response shape doesn't need to change at all to do it.** `CommercePlantRecord` (`lib/commerce-export.ts:37-52`) already has `sourceRecordId` and `sku` as two distinct fields; today they're just populated with the same value (`lib/commerce-export.ts:113-115`, `:131-133`). Separating them is a **behavior change in how `sku` gets populated** (look it up from `commerce_skus` instead of copying `sourceRecordId`), not a schema/contract change GM Commerce needs to adapt its *parsing* to — though per your mid-turn decision, GM Commerce does need to stop *assuming* the two are equal and must persist whatever `sku` it receives verbatim rather than deriving one.
+## 6. Composite identity in application code
 
-**Recommended assignment trigger: at first commerce selection**, not at record creation. Reasons:
-- Assigning a SKU (and its genus/plant registry lookup) at mother/cutting *creation* time would force every single new plant entry through the registry-curation step, even for the vast majority that are just inventory bookkeeping and never sold — real added friction to Crystal/Phil's daily entry workflow for no payoff.
-- At *first selection* ("Select for GM Commerce"), the human is already in exactly the right context/intent (they're actively deciding to sell this specific plant) to also confirm/assign its genus+plant registry code, if not already set.
-- This matches how `commerce_selected_at` itself already works — a deliberate, explicit human action, not an automatic side effect of creation.
+Every list, lookup, acknowledgement, map, and query that touches `commerce_skus` is keyed or filtered on **both** `plant_record_type` and `source_record_id`, never `source_record_id` alone:
 
-## 8. How codes are assigned and collision-resolved in the UI
+- `GET /api/commerce/v1/plants` (`app/api/commerce/v1/plants/route.ts`): the SKU map is keyed `` `${plant_record_type}:${source_record_id}` ``, not a bare `Map<string, string>` on `source_record_id`.
+- The acknowledge route's `lookupSku()` (`app/api/commerce/v1/plants/[recordId]/acknowledge/route.ts`) takes an explicit `plantRecordType` argument and filters `.eq("source_record_id", ...).eq("plant_record_type", ...)`.
+- `app/mothers/page.tsx`/`app/cuttings/page.tsx`'s own per-row SKU lookups filter `.eq("plant_record_type", "mother" | "cutting")` alongside `source_record_id`, for consistency, even though a same-page query can't itself cross tables.
+- `mother_commerce_facts` is the one table intentionally keyed on `source_record_id` alone with no `plant_record_type` filter — it is mother-only by construction (its FK is `references mother_plants(mother_id)`), so there is no type ambiguity to guard against there.
 
-New, small admin screens (not existing today — closest current precedent is the `hoya_species` datalist feeding `MotherNamingFields.tsx`'s species autocomplete, which is a read-only reference list, not a registry with insert/collision-handling):
+**Cross-type collision proof (real, not just reasoned about):** `supabase/commerce_sku_tests.sql`'s `--- cross-type collision ---` scenario inserts a mother with `mother_id = 'HY-COL01'` and, independently, a cutting with `cutting_id = 'HY-COL01'` under a different real mother — nothing in the schema prevents this (§4's collision-risk note), so it's a real scenario, not a contrived one. Both are selected for commerce; the result is two distinct, independently-correct `commerce_skus` rows (`HY-CL1-01` for the mother, `HY-CL2-01-C01` for the cutting), each resolvable on its own via the composite key.
 
-- **Genus Codes** screen: list existing `genus_codes` rows, a form to add a new genus name + 2-letter code. `UNIQUE` constraint on `genus_codes.genus_name` and on the primary key `code` itself — a collision (reusing a code, or re-adding an existing genus) fails at insert with a clear error surfaced in the UI ("Code already assigned to <genus>"), forcing the operator to pick differently, exactly matching rule 1's "assign another unused two-letter code manually."
-- **Plant Codes** screen (or inline in the "Select for GM Commerce" flow itself, if that's the assignment trigger): pick a genus (dropdown sourced from `genus_codes`), then either pick an *existing* plant code for "this is another mother of an identity I've already coded" (search/autocomplete, reusing the same UI pattern as the existing species datalist), or create a new one with a fresh 3-character code + a free-text `display_label` describing the identity. `unique (genus_code, code)` constraint (per §4) surfaces the same kind of collision error.
+**Acknowledgement discriminator:** the acknowledge endpoint's URL shape is unchanged (`POST /api/commerce/v1/plants/:recordId/acknowledge`). It now additionally accepts an optional **`plantRecordType`** discriminator, as either a `plantRecordType` query parameter or a `plantRecordType` field in the JSON request body — `"cutting"` or `"mother"`, rejected with `400` if present but invalid. When supplied, the route addresses that table only, which is what makes a colliding mother reachable at all (without it, a `cutting_id`/`mother_id` collision would mean the cutting — checked first — permanently shadows the mother at that same URL). When omitted, the route falls back to its original "try cuttings, then mother_plants" heuristic, for compatibility with callers that predate this discriminator; that fallback is unsafe under a real collision, which is exactly why a caller that can supply the discriminator should. **GM Commerce should send `plantRecordType` on every acknowledge call once its own implementation is updated against this contract** — see §11 for where that fits in deployment order.
 
-## 9. How new genera and unidentified plants/hybrids receive controlled codes
+## 7. Mother-facts contract
 
-**New genus**: an operator must add a row to `genus_codes` before anything of that genus can get a commerce SKU — deliberate gate, not automatic. (Skrybix's own `mother_plants.genus` column already defaults to `'Hoya'` but is free text — nothing currently stops entering `'Alocasia'` there today; the *commerce SKU* registry is what's new and gated.)
+Collected once, at first mother selection, **required**, never inferred from a name/ID/SKU, never read from the general `notes` field, enforced as real `NOT NULL`/`CHECK` columns on `mother_commerce_facts` (§4) — not merely client-side or RPC-level validation:
 
-**Unidentified/hybrid plants**: no auto-derivation from any name field at all under the new scheme (unlike today's `deriveSpec3`, which *does* auto-slice). The operator manually creates or reuses a `plant_codes` entry with whatever `display_label` makes sense for that identity (e.g. an unidentified plant's collection descriptor) — conceptually similar to today's fallback-to-cultivar-text behavior, but now a deliberate registry lookup/insert instead of blind slicing, satisfying rule 2 directly.
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `photoSubject` | `"exact_plant" \| "representative_plant"` | yes | Whether the sale photo is of the exact plant or a representative example. |
+| `potSize` | string | yes | Free text, e.g. `"6in nursery pot"`. |
+| `plantSize` | string | yes | Free text, e.g. `"18in vine"`. |
+| `rootedEstablished` | boolean | yes | |
+| `shippingPresentation` | `"ships_in_pot" \| "prepared_other"` | yes | |
+| `shippingPresentationDetail` | string \| null | **conditionally required** | Required (DB `CHECK`, not just app code) when `shippingPresentation = "prepared_other"`; otherwise must be null/omitted. |
+| `conditionNotes` | string \| null | no | Optional, exportable, e.g. "recently cut back for shipping." |
 
-## 10. Required API contract update for GM Commerce
+Quantity is locked to `1` at the database level (`quantity int not null default 1 check (quantity = 1)`) — a selected mother record is always exactly one whole plant; revisit only if the owner later approves a different model.
 
-**No JSON shape change.** `sourceRecordId` and `sku` already exist as separate fields. The only real requirement is behavioral, and it's on GM Commerce's side, not Skrybix's: **stop assuming `sourceRecordId === sku`, and persist the received `sku` value verbatim** rather than deriving or reconstructing it. I already flagged this exact point in the handoff doc sent earlier today (the "Identifier contract" section), just written *before* this SKU-separation decision existed — that doc will need a follow-up note once this ships (not done yet, since nothing is implemented — see Status above).
+**Cutting selection does not collect any of this.** Cutting content/semantics are unchanged by this PR.
 
-One clean property of the lazy-assignment design (§6/§7): since `GET /api/commerce/v1/plants` only ever returns *selected* records, and selection is the SKU-assignment trigger, **every record GM Commerce ever receives will already have a real, non-null `sku`** — no placeholder/null-sku case to handle on their end.
+### Exact exported JSON
 
-## 11. Required tests and migration/rollback strategy
+`CommercePlantRecord` (`lib/commerce-export.ts`), the shape both `GET /api/commerce/v1/plants` and the acknowledge endpoint return per record:
 
-**Tests needed** (none of this exists yet — genuinely new coverage, not modifying existing tests):
-- `genus_codes`/`plant_codes` uniqueness constraints reject a duplicate code (DB-level, via a real insert-and-expect-error test, not just app-level validation).
-- `next_commerce_mother_seq`/`next_commerce_cutting_seq` concurrency: mirror the existing `commerce-export.test.ts` style — call concurrently, assert no duplicate sequence numbers issued (there's no existing SQL-level concurrency test for `next_mother_seq`/`next_cutting_seq` either, worth noting as a gap in the *current* test suite too, not just the new one).
-- SKU immutability: no code path updates `commerce_skus.sku` after insert (this can be a code-review/grep check like the ones in this report, or a real test asserting the function set never exposes an update path).
-- Selection-triggers-SKU-assignment integration test: selecting a mother/cutting for commerce that has no `commerce_skus` row yet results in exactly one being created, with a valid, correctly-sequenced SKU.
-- A record already selected before this ships (the `HY-ICE01-C01` case, §6) gets its SKU backfilled correctly by whatever one-time script/action handles that transition.
-
-**Migration**: purely additive — three new tables (`genus_codes`, `plant_codes`, `commerce_skus`) plus two counter tables, zero changes to any existing table, zero changes to `mother_id`/`cutting_id` generation. This is materially the same low-risk shape as every other Supabase migration already shipped this session (new tables/columns via `create table if not exists`/`alter table ... add column if not exists`).
-
-**Rollback**: trivial specifically because it's additive — drop the five new tables, revert `normalizeCuttingForCommerce`/`normalizeMotherForCommerce` to populate `sku` from `sourceRecordId` again (today's exact behavior). Nothing about `mother_plants`/`cuttings` themselves needs to be touched or reverted at any point in this whole feature, in either direction.
-
-## 12. Owner decisions still required
-
-1. **Plant-code uniqueness scope** (§4): per-genus (my recommendation) or global across all genera?
-2. **SKU-assignment trigger** (§7): at first commerce selection (my recommendation) or at record creation?
-3. **Genus codes for genera beyond Hoya/Alocasia**: the spec names Philodendron, Anthurium, Monstera, Dischidia as future genera but gives no codes for them. Per rule 1 ("controlled genus-code registry... assigned through," "not permanently hardcoded"), I'm treating this as **deliberately not mine to invent** — needs your explicit codes (or explicit approval of proposed ones) before those genera can ever get a commerce SKU. Not blocking Hoya/Alocasia work.
-4. **The one already-selected legacy record** (`HY-ICE01-C01`, §6): confirm this is the only record needing SKU backfill as part of rollout, or if there are others already mid-pipeline I haven't seen.
-5. **Mother-plant content semantics** (below): confirm whether Skrybix should start *capturing* these fields at all, and if so, which ones, and whether they're required-at-selection or optional.
-
----
-
-## Mother-plant content-semantics gap inventory (requested separately)
-
-I grepped the full schema, `lib/types.ts`, and everything under `app/mothers` for every field you listed. **None of them exist anywhere in Skrybix today — confirmed by search, zero matches, not inferred:**
-
-| Fact | Exists in Skrybix? |
-|---|---|
-| Exact plant vs. representative plant | No |
-| Pot size | No |
-| Approximate plant/vine size | No |
-| Rooted/established confirmation | No |
-| Ships in pot vs. prepared another way | No |
-| Quantity | No (mothers are always singular rows; there's no quantity concept for a mother the way `cuttings.qty`-adjacent logic exists in `outgoing_log.qty` for sold cuttings) |
-| Condition/recent-cutback notes | No dedicated field — `mother_plants.notes` is a free-text column that *could* hold this informally today, but nothing structured, nothing GM-Commerce-exportable, and nothing that distinguishes "recent cutback" from any other kind of note |
-
-**Per your explicit instruction, I have not invented defaults or synthetic values for any of these.** They are a genuine, confirmed data gap. Closing it (schema + entry-form fields + export) is separable work from the SKU standardization above — happy to scope it as its own design pass once you decide whether it's Skrybix's job to capture these or GM Commerce's job to collect them post-import.
-
----
-
-## Implementation status (added 2026-08-13, after owner approval)
-
-The design above was reviewed and approved with corrections (see the durable decision record in `CLAUDE.md`). Per that approval, the implementation was built and thoroughly tested — **but is deliberately not committed or pushed to this branch/PR**. Only this design report document is being pushed right now. Everything below describes what exists locally, pending your review before it goes anywhere near GitHub or production.
-
-### What was built
-
-- `genus_codes`, `plant_codes`, `commerce_skus` (surrogate PK + `unique (plant_record_type, source_record_id)` + `unique (sku)`, real FK columns to the registries — not a bare `source_record_id primary key` as originally drafted, per your correction), `mother_commerce_facts`, and two atomic sequence-counter tables — all in `supabase/schema.sql`.
-- `select_mother_for_commerce()` / `select_cutting_for_commerce()` — one Postgres function body each (one transaction): SKU assignment, mother-fact recording (mother only), and marking the record selected either all commit or all roll back together. A cutting selection reserves its mother's SKU first without ever selecting/exporting the mother.
-- A trigger makes `commerce_skus` rows fully immutable at the database level (any `UPDATE` is rejected outright), and real foreign keys from `commerce_skus` to `genus_codes`/`plant_codes` mean Postgres itself refuses to rename or delete a registry code that's already been used in an assigned SKU.
-- `lib/commerce-export.ts` updated: `sku` is now looked up, never derived from `sourceRecordId`; `normalizeCuttingForCommerce`/`normalizeMotherForCommerce` fail closed (throw) rather than ever falling back to `sourceRecordId` as a placeholder SKU.
-- Both API routes (`GET /api/commerce/v1/plants`, the acknowledge route) updated to resolve real SKUs. **JSON shape is unchanged** — `sourceRecordId` and `sku` were already separate fields.
-- `app/mothers/actions.ts`/`app/cuttings/actions.ts`: `selectMotherForCommerce`/`selectCuttingForCommerce` now call the new RPCs and require genus/plant codes (+ facts for mothers) instead of being a bare checkbox.
-- `components/CommerceSkuSelectionForm.tsx` (replacing the old `CommerceSelectionControl.tsx`): collects genus/plant code (pick existing or create new inline, mirroring the existing species-datalist pattern) and, for mothers only, the required sale facts. Cutting selection stays a code-only flow — no facts added there, per your instruction that cutting content stays distinct/unchanged.
-
-### How it was verified (not just reasoned about)
-
-A local Postgres 16 instance was actually stood up in this session and the full migration applied against real fixture data (including a mother ID with a genuine embedded space, `HY-AH 05`, matching real production data). Every scenario below was executed for real, with captured output, not assumed:
-
-- Genus/plant code uniqueness rejected on duplicate.
-- Invalid code shape (wrong length/case) rejected.
-- Same 3-character plant code reused across two different genera: allowed (uniqueness is per-genus, per your decision).
-- Two cuttings selected **concurrently** (real parallel processes, not sequential calls) from the same never-before-selected mother: exactly one mother SKU allocated, two distinct cutting sequences, mother's `commerce_selected_at` still `null` afterward.
-- Two concurrent calls selecting the **same** mother: converge on exactly one `commerce_skus` row.
-- `UPDATE`/`DELETE` against an in-use `commerce_skus`/`plant_codes`/`genus_codes` row: all rejected by the database itself.
-- A mother selection missing a required fact (`pot_size`): rejected, and the SKU assignment that had already happened earlier in that same call was rolled back too — verified as zero leftover rows, not assumed from the function's structure.
-- `sourceRecordId` (`HY-AH 05`, space preserved exactly) and `sku` (`HY-ABH-01`) demonstrably different values for the same record.
-
-The exact commands are captured in `supabase/commerce_sku_tests.sql` (checked in, re-run against a second fresh database as a reproducibility check before this report was finalized — same results both times) and the JS-level pure-function tests are in `lib/commerce-export.test.ts` (6/6 passing: sourceRecordId≠sku, fail-closed on missing SKU, mixed mother/cutting export, genus/plant code validation).
-
-### Legacy rollout — the one thing I genuinely cannot do myself
-
-I have no credentialed access to the production Supabase database in this session. Before this ships, run this in the Supabase SQL editor and get me (or whoever reviews next) the actual result — I am not guessing or assuming `HY-ICE01-C01` is the only one:
-
-```sql
-select 'cutting' as plant_record_type, cutting_id as source_record_id, commerce_selected_at
-from cuttings
-where commerce_selected_at is not null and commerce_acknowledged_at is null
-union all
-select 'mother', mother_id, commerce_selected_at
-from mother_plants
-where commerce_selected_at is not null and commerce_acknowledged_at is null
-order by commerce_selected_at;
+```json
+{
+  "sourceSystem": "skrybix",
+  "sourceRecordId": "HY-KRQ01",
+  "sku": "HY-KRQ-01",
+  "displayName": "Hoya krohniana",
+  "parentSourceRecordId": null,
+  "plantRecordType": "mother",
+  "state": "active",
+  "selectionState": "selected",
+  "selectedAt": "2026-08-13T00:00:00.000Z",
+  "acknowledgedAt": null,
+  "archivedAt": null,
+  "sourceCreatedAt": "2026-07-01T00:00:00.000Z",
+  "motherFacts": {
+    "photoSubject": "exact_plant",
+    "potSize": "6in nursery pot",
+    "plantSize": "18in vine",
+    "rootedEstablished": true,
+    "shippingPresentation": "ships_in_pot",
+    "shippingPresentationDetail": null,
+    "conditionNotes": "Recently cut back for shipping"
+  }
+}
 ```
 
-Every row this returns needs a deliberately-assigned SKU (via `select_mother_for_commerce()`/`select_cutting_for_commerce()`, choosing real genus/plant codes for each) as part of rollout, before the new `sku`-resolution behavior goes live — otherwise those specific already-selected records would hit the fail-closed path (no resolvable SKU) the first time `GET /api/commerce/v1/plants` runs post-cutover.
+For a **cutting** record, every field is populated the same way except:
+- `plantRecordType: "cutting"`
+- `parentSourceRecordId`: the cutting's mother's `sourceRecordId` (never null for a cutting)
+- **`motherFacts: null`** — always, exactly `null`, never an absent/omitted key, never an object with null sub-fields. This is the "exact documented null form" a consumer should check for (`record.motherFacts === null`) to distinguish a cutting from a mother, rather than inferring it from `plantRecordType` alone if that's ever more convenient for GM Commerce's own code.
 
-### Explicitly not done in this pass
+**GM Commerce must use `motherFacts` for established-whole-plant listing content (condition, pot/plant size, shipping presentation, rooted/established status) — not cutting-style language — whenever `plantRecordType === "mother"`.** A mother listing and a cutting listing are different products with different presentation needs; this payload exists specifically so GM Commerce doesn't have to guess or reuse cutting copy for a mother sale.
 
-- **Not committed, not pushed, not deployed.** Per your latest message, only this design report is going to GitHub right now.
-- GM Commerce itself: untouched, as instructed.
-- Etsy: not activated, as instructed.
-- Phase 2 batch processing: not started, as instructed.
-- The checkbox/selection *model* itself wasn't changed beyond what's needed to collect the new required data for one record at a time — no batch-select, no bulk assignment tooling.
-- Genus-code creation UI: deliberately not built this pass (only the two owner-approved codes, `HY`/`AL`, are seeded via migration). Per your instruction not to invent codes speculatively, adding a new genus for now means inserting directly into `genus_codes` (same pattern as every other one-off SQL change this session) until/unless a dedicated screen is actually requested.
+**Fail-closed guarantee:** `normalizeMotherForCommerce()` throws rather than exporting a selected mother with a `null`/missing `sku` or a `null`/missing `facts` row — GM Commerce will never receive a mother record with a placeholder SKU or a null-filled `motherFacts` object standing in for missing data.
+
+## 8. Security and database privileges
+
+This app never sends a Supabase anon/publishable key to the browser — there is no `NEXT_PUBLIC_SUPABASE_*` anything anywhere in the repository (verified by direct grep). Every access goes through `getSupabaseServerClient()` (`lib/supabase.ts`), which always uses the **service role key**.
+
+That does not make the new tables/functions safe by default. A Supabase project provisions every object in the `public` schema with default privileges granting access to the `anon`/`authenticated` roles too (`ALTER DEFAULT PRIVILEGES ... GRANT ... TO anon, authenticated, service_role`, set up at project creation, independent of anything this app's code does), and PostgREST auto-exposes every public table and function as a REST/RPC endpoint unless that access is explicitly closed off. **Verified locally, with Supabase's real default-privilege behavior reproduced** (roles `anon`/`authenticated`/`service_role` created, `ALTER DEFAULT PRIVILEGES` applied before the schema, then `schema.sql` applied): before this PR's hardening block, the `anon` role could read `commerce_skus`, insert directly into `genus_codes`, and invoke `select_mother_for_commerce()` — all without touching this app's code or its service-role key.
+
+**Resolution implemented in `schema.sql`/the migration** (CI-verified, §9):
+- **Row Level Security enabled, with zero policies**, on every new table (`genus_codes`, `plant_codes`, `commerce_skus`, `commerce_mother_seq_counters`, `commerce_cutting_seq_counters`, `mother_commerce_facts`). RLS-enabled-with-no-policy is a default-deny for every role except `service_role`, which bypasses RLS unconditionally by Postgres/Supabase design regardless of policies — so the app's own access path is completely unaffected.
+- **`EXECUTE` revoked from `PUBLIC`, `anon`, and `authenticated`**, then re-granted only to `service_role`, on every new callable function (`next_commerce_mother_seq`, `next_commerce_cutting_seq`, `assign_commerce_sku_for_mother`, `assign_commerce_sku_for_cutting`, `select_mother_for_commerce`, `select_cutting_for_commerce`). The `anon`/`authenticated` revokes are guarded by a `DO` block checking role existence first, so `schema.sql` still applies cleanly to a bare local/dev Postgres that has none of Supabase's roles.
+- Every new `plpgsql` function pins `set search_path = public, pg_temp`, closing the standard Postgres search-path-hijack risk (a real, generic hardening step, independent of the RLS/grants question).
+
+**What this deliberately does not do:** it does not add RLS to the rest of this schema (`mother_plants`, `cuttings`, `outgoing_log`, etc.), which has the same exposure today and predates this PR. That is a real, separate, wider gap — worth its own repo-wide hardening pass, not something to silently absorb into a SKU-standardization PR. Flagging it here explicitly rather than fixing it unilaterally or pretending it doesn't exist: if broader RLS adoption across this app is wanted, that's a distinct architectural decision for the owner to make deliberately, likely alongside deciding whether any client-side (non-service-role) Supabase access is ever wanted at all.
+
+## 9. Testing and CI
+
+**`lib/commerce-export.test.ts`** — pure-function layer (export shaping, fail-closed behavior, the `sourceRecordId`/`sku`/`motherFacts` distinctions). 9/9 passing (`npm test`): `sourceRecordId`≠`sku`, space-containing source ID validity, mother-facts export/camelCasing, fail-closed on missing SKU (3 variants), fail-closed on missing mother facts (2 variants), mixed mother/cutting export, composite-key Map behavior, genus/plant code validation.
+
+**`supabase/commerce_sku_tests.sql`** — functional/negative-path SQL suite: genus/plant code uniqueness and shape validation, per-genus code reuse, full mother selection with real facts, the real production embedded-space case (`HY-AH 05`), nonexistent-mother/nonexistent-cutting rejection, mismatch-on-reselection rejection, `UPDATE`/`DELETE` immutability rejection (including registry FK protection), required-facts `NOT NULL` rejection with rollback-atomicity proof (zero leftover rows), the cross-type collision scenario (§6), and idempotent-replay-burns-no-sequence proof (§5).
+
+**`supabase/verify_commerce_sku_migration.sh`** — new: a single script that orchestrates all of the above plus the schema-parity and access-hardening checks against a real Postgres server, runnable locally or in CI. It provisions the same `anon`/`authenticated`/`service_role` roles and default-privilege grants a real Supabase project has, so the access-hardening checks (§8) are exercised the same way, not merely asserted.
+
+**`.github/workflows/commerce-sku-db.yml`** — new: **permanent CI**, replacing "a developer manually ran a SQL script once." Runs on every push to `claude/commerce-sku-implementation` and every pull request touching `supabase/**`. Two jobs:
+- `verify`: spins up a real `postgres:16` service container, fetches `origin/master` (needed as the upgrade path's "simulated production" baseline), and runs `verify_commerce_sku_migration.sh`, which proves — against that real server, every run, not reasoned about on paper —
+  1. `schema.sql` applies cleanly to a fresh database.
+  2. The forward migration applies cleanly on top of the pre-this-PR (`origin/master`) schema, simulating current production.
+  3. Both paths produce a byte-identical resulting schema (`pg_dump -s` diff, object parity).
+  4. Re-applying the migration a second time produces no errors (idempotent).
+  5. `anon` is denied table read, table insert, and RPC execute; `service_role` retains full access (§8).
+  6. The full `commerce_sku_tests.sql` suite runs to completion with the expected rollback-atomicity result.
+  7. Two real concurrent processes selecting two cuttings under the same never-before-selected mother allocate exactly one mother SKU and two distinct cutting SKUs, and never mark the mother selected.
+  8. Two real concurrent processes selecting the **same** record converge on exactly one `commerce_skus` row with an identical resulting SKU.
+  9. No orphaned `commerce_skus` row is left behind after a deliberately failed selection.
+- `app-build-and-test`: `npm test` (unit suite) and `npm run build` (full production build, including TypeScript type-checking across the whole app — no Supabase env vars needed, since every route in this app is server-rendered on demand, confirmed by a real build with them unset).
+
+**Concurrency-test determinism, stated honestly:** the two "real concurrency" scenarios launch two `psql` processes as close together as the shell allows, the same technique used to originally verify this behavior interactively — but the OS scheduler does not guarantee true simultaneous execution on every single run. What *is* deterministic, and asserted on every run regardless of actual interleaving, is the set of post-condition invariants (exactly one mother SKU, exactly two distinct cutting SKUs, mother never marked selected, exactly one row for the same-record case, identical SKU observed by both callers). If the `ON CONFLICT`-based atomicity these functions depend on were ever broken, these invariants would fail whether or not a given CI run happened to produce a genuine race.
+
+**Results as of this revision:** all CI checks pass (`verify` job: all 9 steps; `app-build-and-test`: 9/9 unit tests, clean production build).
+
+## 10. Production legacy inventory — resolved, zero backfill required
+
+A read-only query (covering: selected/acknowledged mothers and cuttings lacking a SKU; selected/acknowledged mothers lacking `mother_commerce_facts`; any `mother_id`/`cutting_id` cross-type collision; current commerce state) was run by the owner directly against the real Skrybix Supabase database.
+
+**Result:** exactly one record needed attention — `HY-LOB01-C04` (a cutting, mother `HY-LOB01`, selected 2026-08-02, already acknowledged by GM Commerce under the pre-this-PR `sku === sourceRecordId` behavior). No `mother_id`/`cutting_id` collisions were found in production. The owner identified `HY-LOB01-C04` as test data that should never have reached production, not a real sale — it and its matching `outgoing_log` row were **deleted** from production (not archived — archiving alone would not have removed it from either the legacy-inventory query or `GET /api/commerce/v1/plants`'s own un-archived-filtered selection, which is part of why it kept resurfacing before). Re-running the query afterward returned **zero rows** across every check.
+
+**Net effect: this PR requires no pre-deployment backfill of any kind.** The moment the migration and application code deploy, `GET /api/commerce/v1/plants` will have nothing to fail closed on, because nothing is currently pending in production.
+
+## 11. Required deployment order
+
+1. Stabilize and review Skrybix PR #11 (this document, in its current state, reflects that stabilization).
+2. GM Commerce implements compatibility against the final contract in this document (§6's acknowledgement discriminator, §7's `motherFacts` payload and exact JSON) — **GM Commerce is not touched by this PR or this session**.
+3. GM Commerce's compatibility work merges, and its own post-merge CI passes.
+4. Apply the Skrybix database migration (`supabase/migrations/20260813221000_commerce_sku_standardization.sql`) to production. Purely additive; safe on its own, since nothing reads/writes the new tables until application code does.
+5. Confirm the production pending-record inventory (§10's query) is still zero, or deliberately resolve any newly-selected records the same way `HY-LOB01-C04` was resolved (assign a real SKU, or determine it's test data and remove it) before proceeding.
+6. Merge and deploy Skrybix PR #11's application code.
+7. Verify the live mixed feed and acknowledgements end to end against real GM Commerce traffic.
+8. Only then permit unattended/worker-driven processing under the new contract.
+
+**Fail-closed activation boundary:** Skrybix must not begin emitting the changed `sku !== sourceRecordId` contract in production before GM Commerce is ready to receive it — steps 4–6 above are the only place that contract goes live, and step 6 (this PR's own merge/deploy) is explicitly **not** part of this session's scope (see §12).
+
+**Rollback:** revert the application-code deployment (step 6) — restores the pre-this-PR `sku = sourceRecordId` copy behavior. No data loss either direction: nothing about `mother_plants`/`cuttings` themselves is ever touched by this feature. The new tables can be left in place (inert, unreferenced, RLS-locked) or dropped; either is safe, since everything about this feature is additive.
+
+## 12. Explicit exclusions (this session)
+
+Not done, deliberately: GM Commerce changed; PR #11 merged or deployed; any `Mother_ID`/`Cutting_ID` value changed; Etsy activated; batch selection or Phase 2 batch processing implemented; speculative genus codes created; mother facts inferred from a name/ID/SKU; the new `sku !== sourceRecordId` feed contract enabled in production; additional production deletion beyond the one already-reported `HY-LOB01-C04` cleanup; any claim that this work is deployed or live.
+
+## 13. Remaining risks / open items
+
+- The concurrency-test determinism caveat in §9 — invariant-checked, not interleaving-guaranteed. Acceptable given what's actually being proven (no duplicate/incorrect SKU under contention), but worth knowing if a future reviewer expects a stronger simultaneity guarantee.
+- RLS is not applied repo-wide (§8) — a real, separate, wider gap on the pre-existing tables, intentionally out of scope for this PR.
+- GM Commerce has not yet implemented anything against this contract (§11 step 2) — this PR cannot move past draft into a real production cutover until that happens, independent of Skrybix's own readiness.
+- No genus-code creation UI exists yet (only `HY`/`AL` are seeded via migration); adding a new genus today means a direct SQL insert. Worth a dedicated screen only if/when a third genus is actually needed.
