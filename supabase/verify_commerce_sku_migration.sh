@@ -32,6 +32,11 @@
 #      exactly once.
 #  10. No orphaned commerce_skus/genus_codes/plant_codes/counter rows are
 #      ever created by the corrected selection path.
+#  11. supabase/existing_id_correction_preflight.sql correctly classifies
+#      both the pre-migration (only old signatures) and post-migration
+#      (old+new signatures, old revoked, new service_role-only) states via
+#      its phase_detection row, and fails closed (unexpected_signature_state)
+#      on a state matching neither shape -- without ever calling an RPC.
 #
 # Expects PGHOST/PGPORT/PGUSER/PGPASSWORD to already be set in the
 # environment (standard libpq vars) pointing at a throwaway Postgres
@@ -47,12 +52,15 @@ MIGRATION_1_SQL="$REPO_ROOT/supabase/migrations/20260813221000_commerce_sku_stan
 MIGRATION_2_SQL="$REPO_ROOT/supabase/migrations/20260815120000_existing_id_as_commerce_sku.sql"
 LEGACY_TESTS_SQL="$REPO_ROOT/supabase/commerce_sku_tests.sql"
 CORRECTION_TESTS_SQL="$REPO_ROOT/supabase/existing_id_commerce_tests.sql"
+PREFLIGHT_SQL="$REPO_ROOT/supabase/existing_id_correction_preflight.sql"
 
 FRESH_DB="skrybix_ci_fresh"
 UPGRADE_DB="skrybix_ci_upgrade"
 CONCURRENCY_DB="skrybix_ci_concurrency"
 LEGACY_FUNCTIONAL_DB="skrybix_ci_legacy_functional"
 CORRECTION_FUNCTIONAL_DB="skrybix_ci_correction_functional"
+PREFLIGHT_PRE_DB="skrybix_ci_preflight_pre"
+PREFLIGHT_UNEXPECTED_DB="skrybix_ci_preflight_unexpected"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -248,6 +256,49 @@ ORPHAN_PLANT_CODES=$(psql -d "$CONCURRENCY_DB" -tAc "select count(*) from plant_
 [ "$ORPHAN_PLANT_CODES" -eq 0 ] || fail "found $ORPHAN_PLANT_CODES unexpected plant_codes row(s) after the corrected concurrency scenarios"
 pass "no dormant-object rows were created by any of the corrected selection scenarios above"
 
+echo "=== [11/11] Preflight phase detection: pre-migration, post-migration, and fail-closed on an unexpected state ==="
+# Pre-migration: origin/master schema only (migration 2 not applied yet).
+psql_admin -d postgres -c "drop database if exists $PREFLIGHT_PRE_DB;"
+psql_admin -d postgres -c "create database $PREFLIGHT_PRE_DB owner $PGUSER;"
+setup_supabase_roles "$PREFLIGHT_PRE_DB"
+psql_admin -d "$PREFLIGHT_PRE_DB" -f "$PRE_PR_SCHEMA"
+PRE_PHASE=$(psql -d "$PREFLIGHT_PRE_DB" -tAc "$(cat "$PREFLIGHT_SQL")" | grep '^phase_detection|' | cut -d'|' -f2)
+[ "$PRE_PHASE" = "pre_migration" ] || fail "preflight phase_detection on pre-migration schema returned '$PRE_PHASE', expected 'pre_migration'"
+pass "preflight correctly classifies the pre-migration state (only old signatures) as pre_migration, not an error"
+
+# Post-migration: FRESH_DB already has schema.sql applied, which includes
+# both forward migrations' effect in full (a fresh dump, not an upgrade
+# path) -- reuse it rather than building a third database.
+POST_PHASE=$(psql -d "$FRESH_DB" -tAc "$(cat "$PREFLIGHT_SQL")" | grep '^phase_detection|' | cut -d'|' -f2)
+[ "$POST_PHASE" = "post_migration" ] || fail "preflight phase_detection on fully-corrected schema returned '$POST_PHASE', expected 'post_migration'"
+pass "preflight correctly classifies the post-migration state (old+new signatures, old revoked, new service_role-only) as post_migration"
+
+# Unexpected/fail-closed: take a fully-corrected schema and manually
+# re-grant EXECUTE on an old, supposedly-dormant overload to service_role
+# -- a state that must never be silently accepted as either expected shape.
+psql_admin -d postgres -c "drop database if exists $PREFLIGHT_UNEXPECTED_DB;"
+psql_admin -d postgres -c "create database $PREFLIGHT_UNEXPECTED_DB owner $PGUSER;"
+setup_supabase_roles "$PREFLIGHT_UNEXPECTED_DB"
+psql_admin -d "$PREFLIGHT_UNEXPECTED_DB" -f "$SCHEMA_SQL"
+psql_admin -d "$PREFLIGHT_UNEXPECTED_DB" -c "
+  grant execute on function select_cutting_for_commerce(text, character, text) to service_role;
+"
+UNEXPECTED_PHASE=$(psql -d "$PREFLIGHT_UNEXPECTED_DB" -tAc "$(cat "$PREFLIGHT_SQL")" | grep '^phase_detection|' | cut -d'|' -f2)
+[ "$UNEXPECTED_PHASE" = "unexpected_signature_state" ] || fail "preflight phase_detection on a deliberately-broken grant state returned '$UNEXPECTED_PHASE', expected 'unexpected_signature_state' (fail closed)"
+pass "preflight fails closed (unexpected_signature_state) when the old overload's EXECUTE grant is not actually revoked from service_role"
+
+# The preflight file must remain provably read-only -- no statement other
+# than SELECT/WITH may appear (belt-and-suspenders on top of manual review).
+# String literals are stripped BEFORE comments (not the other way around):
+# some of this file's own result strings contain a literal "--" as part of
+# their English text, which would otherwise truncate a naive comment-strip
+# mid-string and leave a spurious "grant"/"do not" fragment exposed.
+PREFLIGHT_STRIPPED=$(sed -E "s/'([^']|'')*'//g" "$PREFLIGHT_SQL" | sed 's/--.*$//')
+if echo "$PREFLIGHT_STRIPPED" | grep -qiE '\b(insert|update|delete|merge|create|alter|drop|grant|revoke|begin|commit|rollback|call)\b|\bdo\s*\$'; then
+  fail "existing_id_correction_preflight.sql appears to contain a non-SELECT statement -- it must remain strictly read-only"
+fi
+pass "existing_id_correction_preflight.sql contains no DML/DDL/RPC/transaction-control keywords"
+
 echo
 echo "=== ALL CHECKS PASSED ==="
 
@@ -256,3 +307,5 @@ psql_admin -d postgres -c "drop database if exists $UPGRADE_DB;"
 psql_admin -d postgres -c "drop database if exists $CONCURRENCY_DB;"
 psql_admin -d postgres -c "drop database if exists $LEGACY_FUNCTIONAL_DB;"
 psql_admin -d postgres -c "drop database if exists $CORRECTION_FUNCTIONAL_DB;"
+psql_admin -d postgres -c "drop database if exists $PREFLIGHT_PRE_DB;"
+psql_admin -d postgres -c "drop database if exists $PREFLIGHT_UNEXPECTED_DB;"
