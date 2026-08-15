@@ -9,7 +9,9 @@
 #
 #   1. supabase/schema.sql applies cleanly to a fresh database.
 #   2. The two forward migrations apply cleanly, in order, to a database
-#      seeded with the pre-any-of-this-PR schema (simulating production).
+#      seeded with a frozen, checked-in pre-migration schema fixture
+#      (supabase/fixtures/pre_20260815120000_schema.sql, simulating
+#      production before this correction).
 #   3. Both paths produce a byte-identical resulting schema (parity).
 #   4. Re-applying either migration a second time is a safe no-op.
 #   5. The access-hardening block blocks anon/authenticated and leaves
@@ -53,6 +55,20 @@ MIGRATION_2_SQL="$REPO_ROOT/supabase/migrations/20260815120000_existing_id_as_co
 LEGACY_TESTS_SQL="$REPO_ROOT/supabase/commerce_sku_tests.sql"
 CORRECTION_TESTS_SQL="$REPO_ROOT/supabase/existing_id_commerce_tests.sql"
 PREFLIGHT_SQL="$REPO_ROOT/supabase/existing_id_correction_preflight.sql"
+# Checked-in, immutable snapshot of supabase/schema.sql as of commit
+# a4f69f1c94d807c5df8c50926d00eccf5e14e8eb (PR #11's merge -- the last
+# commit before 20260815120000_existing_id_as_commerce_sku.sql existed).
+# Deliberately NOT `git show origin/master:supabase/schema.sql`: that
+# used to work as a "pre-PR baseline" stand-in only by coincidence, while
+# this PR's branch had not yet been merged. The moment it merges,
+# origin/master IS the corrected schema, so a script that re-derives its
+# "pre-migration" fixture from origin/master silently starts asserting
+# the wrong thing post-merge (caught for real: CI run 31887035830 failed
+# on master with `phase_detection` correctly returning 'post_migration'
+# against a test that still expected 'pre_migration'). A frozen fixture
+# tied to an explicit historical SHA can't drift out from under the
+# script the way a branch ref can.
+PRE_MIGRATION_SCHEMA_FIXTURE="$REPO_ROOT/supabase/fixtures/pre_20260815120000_schema.sql"
 
 FRESH_DB="skrybix_ci_fresh"
 UPGRADE_DB="skrybix_ci_upgrade"
@@ -116,11 +132,10 @@ psql_admin -d postgres -c "drop database if exists $UPGRADE_DB;"
 psql_admin -d postgres -c "create database $UPGRADE_DB owner $PGUSER;"
 setup_supabase_roles "$UPGRADE_DB"
 
-PRE_PR_SCHEMA="$(mktemp)"
-git -C "$REPO_ROOT" show origin/master:supabase/schema.sql > "$PRE_PR_SCHEMA" \
-  || fail "could not read origin/master:supabase/schema.sql -- is origin/master fetched?"
-psql_admin -d "$UPGRADE_DB" -f "$PRE_PR_SCHEMA"
-pass "pre-PR (origin/master) schema applied cleanly, simulating current production"
+[ -f "$PRE_MIGRATION_SCHEMA_FIXTURE" ] \
+  || fail "missing $PRE_MIGRATION_SCHEMA_FIXTURE -- the checked-in pre-migration schema fixture"
+psql_admin -d "$UPGRADE_DB" -f "$PRE_MIGRATION_SCHEMA_FIXTURE"
+pass "pre-migration (frozen a4f69f1 fixture) schema applied cleanly, simulating current production"
 
 psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_1_SQL"
 pass "commerce-SKU standardization migration applied cleanly"
@@ -257,11 +272,13 @@ ORPHAN_PLANT_CODES=$(psql -d "$CONCURRENCY_DB" -tAc "select count(*) from plant_
 pass "no dormant-object rows were created by any of the corrected selection scenarios above"
 
 echo "=== [11/11] Preflight phase detection: pre-migration, post-migration, and fail-closed on an unexpected state ==="
-# Pre-migration: origin/master schema only (migration 2 not applied yet).
+# Pre-migration: the frozen a4f69f1 fixture (migration 2 not applied yet)
+# -- NOT origin/master, which is the corrected schema once this branch is
+# merged. See the PRE_MIGRATION_SCHEMA_FIXTURE comment above for why.
 psql_admin -d postgres -c "drop database if exists $PREFLIGHT_PRE_DB;"
 psql_admin -d postgres -c "create database $PREFLIGHT_PRE_DB owner $PGUSER;"
 setup_supabase_roles "$PREFLIGHT_PRE_DB"
-psql_admin -d "$PREFLIGHT_PRE_DB" -f "$PRE_PR_SCHEMA"
+psql_admin -d "$PREFLIGHT_PRE_DB" -f "$PRE_MIGRATION_SCHEMA_FIXTURE"
 PRE_PHASE=$(psql -d "$PREFLIGHT_PRE_DB" -tAc "$(cat "$PREFLIGHT_SQL")" | grep '^phase_detection|' | cut -d'|' -f2)
 [ "$PRE_PHASE" = "pre_migration" ] || fail "preflight phase_detection on pre-migration schema returned '$PRE_PHASE', expected 'pre_migration'"
 pass "preflight correctly classifies the pre-migration state (only old signatures) as pre_migration, not an error"
