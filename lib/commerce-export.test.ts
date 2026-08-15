@@ -9,20 +9,18 @@ import {
   type MotherCommerceSource,
   type MotherCommerceFactsSource,
 } from "./commerce-export.ts";
-import { validateGenusCode, validatePlantCode } from "./commerce-sku.ts";
 
-// The SQL-level guarantees (atomic mother/cutting SKU allocation,
-// database-enforced immutability -- including DELETE, not just UPDATE --
-// concurrent selection never allocating duplicate sequences or
-// side-effect-selecting a mother, registry rename/delete protection,
-// existence checks, and genus/plant-code-mismatch rejection on an
-// already-assigned record) live in Postgres functions/constraints, not
-// in this JS module -- they were verified directly against a real local
-// Postgres 16 instance, both fresh and via the forward migration file,
-// before this file was written. See docs/Skrybix_Commerce_SKU_Design_Report.md
-// and the implementation report for the exact commands and output. What
-// belongs here is the pure-function layer: export shaping, fail-closed
-// behavior, and the sourceRecordId/sku/motherFacts distinctions.
+// OWNER DECISION (existing-ID-as-SKU correction, superseding the
+// short-lived genus/plant-code standardized-SKU design): mother_id/
+// cutting_id ARE the commerce/Shopify SKU, byte-for-byte, always. There
+// is no separate sku parameter anymore -- normalizeCuttingForCommerce/
+// normalizeMotherForCommerce compute sku directly from the source
+// record's own ID field. The database-boundary guarantees (atomicity,
+// idempotency, dormancy of the old genus/plant-code objects) live in
+// Postgres functions/constraints, not JS -- see
+// supabase/existing_id_commerce_tests.sql for those, verified against a
+// real local Postgres 16 instance. What belongs here is the pure-function
+// layer: exact identity preservation and export shaping.
 
 const MOTHER_FACTS: MotherCommerceFactsSource = {
   photo_subject: "exact_plant",
@@ -34,59 +32,74 @@ const MOTHER_FACTS: MotherCommerceFactsSource = {
   condition_notes: "Recently cut back for shipping",
 };
 
-test("sourceRecordId and sku are demonstrably different values", () => {
-  const cutting: CuttingCommerceSource = {
-    cutting_id: "HY-KRQ01-C01",
-    mother_id: "HY-KRQ01",
-    full_display_name: "Hoya krohniana",
+function cutting(overrides: Partial<CuttingCommerceSource>): CuttingCommerceSource {
+  return {
+    cutting_id: "HY-ICE01-C01",
+    mother_id: "HY-ICE01",
+    full_display_name: "Hoya iceana",
     sold: false,
     archived_at: null,
     created_at: "2026-07-01T00:00:00.000Z",
     commerce_selected_at: "2026-08-13T00:00:00.000Z",
     commerce_acknowledged_at: null,
+    ...overrides,
   };
+}
 
-  const record = normalizeCuttingForCommerce(cutting, "HY-KRQ-01-C01");
+function mother(overrides: Partial<MotherCommerceSource>): MotherCommerceSource {
+  return {
+    mother_id: "HY-ICE01",
+    display_name: "Hoya iceana",
+    sold: false,
+    archived_at: null,
+    created_at: "2026-07-01T00:00:00.000Z",
+    commerce_selected_at: "2026-08-13T00:00:00.000Z",
+    commerce_acknowledged_at: null,
+    ...overrides,
+  };
+}
 
-  assert.equal(record.sourceRecordId, "HY-KRQ01-C01");
-  assert.equal(record.sku, "HY-KRQ-01-C01");
-  assert.notEqual(record.sourceRecordId, record.sku);
-  assert.equal(record.motherFacts, null);
+test("mother HY-ICE01 exports with sku exactly equal to sourceRecordId", () => {
+  const record = normalizeMotherForCommerce(mother({ mother_id: "HY-ICE01" }), MOTHER_FACTS);
+  assert.equal(record.sourceRecordId, "HY-ICE01");
+  assert.equal(record.sku, "HY-ICE01");
+  assert.equal(record.sku, record.sourceRecordId);
 });
 
-test("a source record ID containing a real space remains valid and is never rewritten", () => {
-  // Confirmed real production case (not fabricated) -- see the design
-  // report's material-conflict check.
-  const mother: MotherCommerceSource = {
-    mother_id: "HY-AH 05",
-    display_name: "Hoya AH Black Magic",
-    sold: false,
-    archived_at: null,
-    created_at: "2026-07-01T00:00:00.000Z",
-    commerce_selected_at: "2026-08-13T00:00:00.000Z",
-    commerce_acknowledged_at: null,
-  };
-
-  const record = normalizeMotherForCommerce(mother, "HY-ABH-01", MOTHER_FACTS);
-
-  assert.equal(record.sourceRecordId, "HY-AH 05");
-  assert.equal(record.sku, "HY-ABH-01");
+test("cutting HY-ICE01-C01 exports unchanged, sku === sourceRecordId", () => {
+  const record = normalizeCuttingForCommerce(cutting({ cutting_id: "HY-ICE01-C01", mother_id: "HY-ICE01" }));
+  assert.equal(record.sourceRecordId, "HY-ICE01-C01");
+  assert.equal(record.sku, "HY-ICE01-C01");
 });
 
-test("mother facts are carried into the export, camelCased, and present only on mother records", () => {
-  const mother: MotherCommerceSource = {
-    mother_id: "HY-CAR01",
-    display_name: "Hoya carnosa",
-    sold: false,
-    archived_at: null,
-    created_at: "2026-07-01T00:00:00.000Z",
-    commerce_selected_at: "2026-08-13T00:00:00.000Z",
-    commerce_acknowledged_at: null,
-  };
+test("cutting HY-ICE01-C100 exports unchanged -- no truncation past two digits", () => {
+  const record = normalizeCuttingForCommerce(cutting({ cutting_id: "HY-ICE01-C100", mother_id: "HY-ICE01" }));
+  assert.equal(record.sourceRecordId, "HY-ICE01-C100");
+  assert.equal(record.sku, "HY-ICE01-C100");
+  assert.ok(record.sku.endsWith("C100"), "must be C100, not truncated to C10 or C00");
+});
 
-  const record = normalizeMotherForCommerce(mother, "HY-CAR-01", MOTHER_FACTS);
+test("mother HY-AH 01 exports unchanged -- internal space not trimmed, collapsed, or replaced", () => {
+  const record = normalizeMotherForCommerce(mother({ mother_id: "HY-AH 01", display_name: "Hoya AH Black Magic" }), MOTHER_FACTS);
+  assert.equal(record.sourceRecordId, "HY-AH 01");
+  assert.equal(record.sku, "HY-AH 01");
+  assert.equal(record.sku.includes(" "), true, "the embedded space must survive exactly");
+  assert.equal(record.sku, "HY-AH 01", "not 'HY-AH01', 'HY-AH  01', or any other reformatting");
+});
 
-  assert.deepEqual(record.motherFacts, {
+test("cutting HY-AH 01-C08 exports unchanged -- internal space preserved through the cutting suffix too", () => {
+  const record = normalizeCuttingForCommerce(cutting({ cutting_id: "HY-AH 01-C08", mother_id: "HY-AH 01" }));
+  assert.equal(record.sourceRecordId, "HY-AH 01-C08");
+  assert.equal(record.sku, "HY-AH 01-C08");
+  assert.equal(record.parentSourceRecordId, "HY-AH 01");
+});
+
+test("motherFacts export behavior is unchanged by the correction: populated for mothers, null for cuttings", () => {
+  const cuttingRecord = normalizeCuttingForCommerce(cutting({}));
+  assert.equal(cuttingRecord.motherFacts, null);
+
+  const motherRecord = normalizeMotherForCommerce(mother({}), MOTHER_FACTS);
+  assert.deepEqual(motherRecord.motherFacts, {
     photoSubject: "exact_plant",
     potSize: "6in",
     plantSize: "18in vine",
@@ -97,107 +110,57 @@ test("mother facts are carried into the export, camelCased, and present only on 
   });
 });
 
-test("fails closed: a selected record with no resolvable SKU is never exported with a fallback sku", () => {
-  const cutting: CuttingCommerceSource = {
-    cutting_id: "HY-KRQ01-C01",
-    mother_id: "HY-KRQ01",
-    full_display_name: "Hoya krohniana",
-    sold: false,
-    archived_at: null,
-    created_at: "2026-07-01T00:00:00.000Z",
-    commerce_selected_at: "2026-08-13T00:00:00.000Z",
-    commerce_acknowledged_at: null,
-  };
-
-  assert.throws(() => normalizeCuttingForCommerce(cutting, null), /no assigned commerce SKU/);
-  assert.throws(() => normalizeCuttingForCommerce(cutting, undefined), /no assigned commerce SKU/);
-  assert.throws(() => normalizeCuttingForCommerce(cutting, ""), /no assigned commerce SKU/);
-
-  const mother: MotherCommerceSource = {
-    mother_id: "HY-AH 05",
-    display_name: "x",
-    sold: false,
-    archived_at: null,
-    created_at: "2026-07-01T00:00:00.000Z",
-    commerce_selected_at: "2026-08-13T00:00:00.000Z",
-    commerce_acknowledged_at: null,
-  };
-  assert.throws(() => normalizeMotherForCommerce(mother, null, MOTHER_FACTS), /no assigned commerce SKU/);
+test("fails closed: a selected mother with no recorded commerce facts is still refused (unchanged requirement)", () => {
+  const m = mother({ mother_id: "HY-AH 01" });
+  assert.throws(() => normalizeMotherForCommerce(m, null), /no recorded commerce sale facts/);
+  assert.throws(() => normalizeMotherForCommerce(m, undefined), /no recorded commerce sale facts/);
 });
 
-test("fails closed: a selected mother with no recorded commerce facts is never exported with nulls", () => {
-  const mother: MotherCommerceSource = {
-    mother_id: "HY-AH 05",
-    display_name: "x",
-    sold: false,
-    archived_at: null,
-    created_at: "2026-07-01T00:00:00.000Z",
-    commerce_selected_at: "2026-08-13T00:00:00.000Z",
-    commerce_acknowledged_at: null,
-  };
+test("fails closed: an unselected record is refused regardless of the correction", () => {
+  const unselectedCutting = cutting({ commerce_selected_at: null });
+  assert.throws(() => normalizeCuttingForCommerce(unselectedCutting), /Cannot export unselected cutting/);
 
-  assert.throws(() => normalizeMotherForCommerce(mother, "HY-ABH-01", null), /no recorded commerce sale facts/);
-  assert.throws(() => normalizeMotherForCommerce(mother, "HY-ABH-01", undefined), /no recorded commerce sale facts/);
+  const unselectedMother = mother({ commerce_selected_at: null });
+  assert.throws(() => normalizeMotherForCommerce(unselectedMother, MOTHER_FACTS), /Cannot export unselected mother/);
 });
 
-test("mixed mother/cutting response: both record types export correctly in one payload with distinct SKUs", () => {
+test("mixed mother/cutting response: both record types export correctly with sku === sourceRecordId for every record, API shape unchanged", () => {
   const handoff = createCommerceExport(
     [
-      {
-        cutting_id: "HY-ABC01-C01",
-        mother_id: "HY-ABC01",
-        full_display_name: "Hoya example",
-        sold: false,
-        archived_at: null,
-        created_at: "2026-07-01T00:00:00.000Z",
+      cutting({
+        cutting_id: "HY-ICE01-C01",
+        mother_id: "HY-ICE01",
+        full_display_name: "Hoya iceana",
         commerce_selected_at: "2026-08-01T00:00:00.000Z",
-        commerce_acknowledged_at: null,
-      },
-      {
-        cutting_id: "HY-ABC01-C02",
-        mother_id: "HY-ABC01",
+      }),
+      cutting({
+        cutting_id: "HY-ICE01-C02",
+        mother_id: "HY-ICE01",
         full_display_name: "Unselected Hoya",
-        sold: false,
-        archived_at: null,
-        created_at: "2026-07-01T00:00:00.000Z",
         commerce_selected_at: null,
-        commerce_acknowledged_at: null,
-      },
-      {
-        cutting_id: "HY-ABC01-C03",
-        mother_id: "HY-ABC01",
+      }),
+      cutting({
+        cutting_id: "HY-ICE01-C03",
+        mother_id: "HY-ICE01",
         full_display_name: "Acknowledged Hoya",
         sold: true,
-        archived_at: null,
-        created_at: "2026-07-01T00:00:00.000Z",
         commerce_selected_at: "2026-07-31T00:00:00.000Z",
         commerce_acknowledged_at: "2026-08-01T01:00:00.000Z",
-      },
+      }),
     ],
     [
-      {
+      mother({
         mother_id: "HY-XYZ01",
         display_name: "Hoya whole-mother example",
-        sold: false,
-        archived_at: null,
         created_at: "2026-06-01T00:00:00.000Z",
         commerce_selected_at: "2026-08-01T00:30:00.000Z",
-        commerce_acknowledged_at: null,
-      },
-      {
+      }),
+      mother({
         mother_id: "HY-XYZ02",
         display_name: "Unselected mother",
-        sold: false,
-        archived_at: null,
-        created_at: "2026-06-01T00:00:00.000Z",
         commerce_selected_at: null,
-        commerce_acknowledged_at: null,
-      },
+      }),
     ],
-    new Map([
-      ["cutting:HY-ABC01-C01", "HY-ABC-01-C01"],
-      ["mother:HY-XYZ01", "HY-XYZ-01"],
-    ]),
     new Map([["HY-XYZ01", MOTHER_FACTS]]),
     "2026-08-01T02:00:00.000Z"
   );
@@ -212,10 +175,10 @@ test("mixed mother/cutting response: both record types export correctly in one p
     records: [
       {
         sourceSystem: "skrybix",
-        sourceRecordId: "HY-ABC01-C01",
-        sku: "HY-ABC-01-C01",
-        displayName: "Hoya example",
-        parentSourceRecordId: "HY-ABC01",
+        sourceRecordId: "HY-ICE01-C01",
+        sku: "HY-ICE01-C01",
+        displayName: "Hoya iceana",
+        parentSourceRecordId: "HY-ICE01",
         plantRecordType: "cutting",
         state: "active",
         selectionState: "selected",
@@ -228,7 +191,7 @@ test("mixed mother/cutting response: both record types export correctly in one p
       {
         sourceSystem: "skrybix",
         sourceRecordId: "HY-XYZ01",
-        sku: "HY-XYZ-01",
+        sku: "HY-XYZ01",
         displayName: "Hoya whole-mother example",
         parentSourceRecordId: null,
         plantRecordType: "mother",
@@ -250,38 +213,8 @@ test("mixed mother/cutting response: both record types export correctly in one p
       },
     ],
   });
-});
 
-test("composite plant_record_type:source_record_id keys prevent a cross-table ID collision from overwriting a SKU", () => {
-  // If a mother and a cutting ever shared the same raw ID string (never
-  // supposed to happen given cutting IDs always carry a -C## suffix, but
-  // not DB-enforced against each other -- see the design report's
-  // collision-risk section), a bare source_record_id key would let one
-  // overwrite the other in this Map. The composite key prevents that.
-  const skusByRecordId = new Map([
-    ["cutting:SAME-ID", "HY-AAA-01-C01"],
-    ["mother:SAME-ID", "HY-BBB-01"],
-  ]);
-
-  assert.equal(skusByRecordId.get("cutting:SAME-ID"), "HY-AAA-01-C01");
-  assert.equal(skusByRecordId.get("mother:SAME-ID"), "HY-BBB-01");
-});
-
-test("genus code validation: exactly 2 uppercase letters", () => {
-  assert.equal(validateGenusCode("HY"), null);
-  assert.equal(validateGenusCode("AL"), null);
-  assert.match(validateGenusCode("hy") ?? "", /2 uppercase letters/);
-  assert.match(validateGenusCode("H") ?? "", /2 uppercase letters/);
-  assert.match(validateGenusCode("HYX") ?? "", /2 uppercase letters/);
-  assert.match(validateGenusCode("H1") ?? "", /2 uppercase letters/);
-});
-
-test("plant code validation: exactly 3 uppercase letters/digits, no spaces or punctuation", () => {
-  assert.equal(validatePlantCode("KRQ"), null);
-  assert.equal(validatePlantCode("AB1"), null);
-  assert.match(validatePlantCode("krq") ?? "", /3 uppercase/);
-  assert.match(validatePlantCode("AB") ?? "", /3 uppercase/);
-  assert.match(validatePlantCode("ABCD") ?? "", /3 uppercase/);
-  assert.match(validatePlantCode("A-B") ?? "", /3 uppercase/);
-  assert.match(validatePlantCode("A B") ?? "", /3 uppercase/);
+  for (const record of handoff.records) {
+    assert.equal(record.sku, record.sourceRecordId, `sku must equal sourceRecordId for ${record.sourceRecordId}`);
+  }
 });

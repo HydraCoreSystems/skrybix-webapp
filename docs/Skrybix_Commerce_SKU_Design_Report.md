@@ -1,5 +1,17 @@
 # Skrybix Commerce SKU Standardization — Final Design & Implementation Record
 
+> **SUPERSEDED (2026-08-15), before ever deploying.** The genus/plant-code
+> standardized-SKU design this whole document describes was reversed by
+> owner decision before PR #11 deployed to production. `mother_id`/
+> `cutting_id` are the commerce/Shopify SKU again, byte-for-byte — see
+> `CLAUDE.md`'s decision record item 15 and PR
+> `claude/existing-id-commerce-sku-correction` for the correction, its
+> root cause (a real identifier-format audit found this scheme's own
+> `spec3` bucketing already collapsing distinct real AH-family catalog
+> numbers), and the current, authoritative contract. This document is
+> kept for historical record of the superseded design and its
+> verification methodology, not as a description of current behavior.
+
 **Status as of this revision:** implemented, committed, pushed, open as a **draft** pull request (#11) against `master` on branch `claude/commerce-sku-implementation`. **Not merged. Not deployed. Not production-enabled.** No code path in production calls any function or reads any table this document describes.
 
 This is the single authoritative document for this feature. Earlier drafts of this report existed as a design-only proposal, then accumulated dated "addendum" sections as the implementation, a blocking review, and a production data check each landed. This revision replaces all of that with one document reflecting only the final state — no superseded schema, no "still open" owner decision that has since been resolved. Where prior history matters (why a decision was made a certain way), it's noted in place, not left as a separate correction layered on top.

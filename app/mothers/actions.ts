@@ -7,7 +7,7 @@ import { markSpeciesOwnedIfNeeded } from "@/lib/species-tracker";
 import { buildMotherId, deriveSpec3 } from "@/lib/mother-id";
 import { composeDisplayName } from "@/lib/hoya-naming";
 import type { CommerceSelectionActionResult } from "@/lib/commerce-export";
-import { validateGenusCode, validatePlantCode, type MotherCommerceFactsInput } from "@/lib/commerce-sku";
+import type { MotherCommerceFactsInput } from "@/lib/commerce-sku";
 
 function nullIfBlank(v: FormDataEntryValue | null): string | null {
   const s = String(v ?? "").trim();
@@ -105,33 +105,26 @@ export async function toggleMotherField(motherId: string, field: "sold" | "print
   }
 }
 
-// Selecting a mother for GM Commerce now also assigns its standardized
-// commerce SKU and records the required mother-sale facts (§8 of the
-// design report -- pot size, plant size, rooted/established, shipping
-// presentation, photo subject). Runs through select_mother_for_commerce()
-// (supabase/schema.sql), one atomic Postgres transaction: SKU
-// assignment, fact recording, and marking the mother selected either all
-// commit or all roll back together. Facts are never inferred or
-// defaulted here -- every required field must arrive from the form; a
-// missing one fails the whole call (enforced again at the database
-// level via NOT NULL, not just here).
+// OWNER DECISION (existing-ID-as-SKU correction): mother_id IS the
+// commerce/Shopify SKU -- no separate genus/plant-code SKU is generated
+// anymore. Records the required mother-sale facts (pot size, plant size,
+// rooted/established, shipping presentation, photo subject) and marks
+// the mother selected, atomically, via the corrected
+// select_mother_for_commerce(text, ...) RPC (a new, narrower overload --
+// see supabase/schema.sql). Facts are never inferred or defaulted here
+// -- every required field must arrive from the form; a missing one fails
+// the whole call (enforced again at the database level via NOT NULL,
+// not just here). The RPC returns p_mother_id verbatim, so `sku` in the
+// result is always exactly the mother's own ID.
 export async function selectMotherForCommerce(
   motherId: string,
-  genusCode: string,
-  plantCode: string,
   facts: MotherCommerceFactsInput
 ): Promise<CommerceSelectionActionResult> {
   const normalizedMotherId = motherId.trim();
-  const normalizedGenus = genusCode.trim().toUpperCase();
-  const normalizedPlant = plantCode.trim().toUpperCase();
 
   if (!normalizedMotherId) {
     return { ok: false, message: "A mother ID is required." };
   }
-  const genusError = validateGenusCode(normalizedGenus);
-  if (genusError) return { ok: false, message: genusError };
-  const plantError = validatePlantCode(normalizedPlant);
-  if (plantError) return { ok: false, message: plantError };
   if (!facts.potSize.trim() || !facts.plantSize.trim()) {
     return { ok: false, message: "Pot size and plant size are required." };
   }
@@ -142,8 +135,6 @@ export async function selectMotherForCommerce(
   const supabase = getSupabaseServerClient();
   const { data: sku, error } = await supabase.rpc("select_mother_for_commerce", {
     p_mother_id: normalizedMotherId,
-    p_genus_code: normalizedGenus,
-    p_plant_code: normalizedPlant,
     p_photo_subject: facts.photoSubject,
     p_pot_size: facts.potSize.trim(),
     p_plant_size: facts.plantSize.trim(),

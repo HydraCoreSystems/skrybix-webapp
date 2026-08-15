@@ -797,6 +797,71 @@ confirmed yet.
       afterward confirmed zero records remain needing a SKU or
       mother-facts backfill. No pre-deployment backfill step is required.
 
+15. **2026-08-15: existing-ID-as-SKU correction — item 14's design is
+    REVERSED by owner decision, before it ever deployed.** After a
+    dedicated identifier-format audit (real production data pulled from
+    the live Skrybix Google Sheet, not assumed) showed the genus/
+    plant-code standardized-SKU scheme from item 14 was itself
+    ambiguity-prone for real AH-family hybrids (multiple distinct real
+    catalog numbers — `AH021`, `AH074`, `AH0024` — already collapse into
+    the same 3-character bucket and lose their distinguishing digits),
+    the owner decided **not** to fix that scheme but to abandon the
+    separate-SKU model entirely: **`mother_id`/`cutting_id` ARE the
+    commerce/Shopify SKU again, byte-for-byte, exactly as they were
+    before item 14** — no second human-facing identifier is generated at
+    all. A future, separate piece of work (not this correction) will
+    design a proper collision-safe token-suggestion scheme for *new*
+    mother IDs going forward (e.g. `HY-AH023-01` instead of today's
+    `deriveSpec3`); existing IDs will remain grandfathered regardless.
+    - **What changed back**: `normalizeCuttingForCommerce()`/
+      `normalizeMotherForCommerce()` (`lib/commerce-export.ts`) no longer
+      take a separate `sku` parameter — `sku` is computed directly as
+      `cutting.cutting_id`/`mother.mother_id`, so it cannot drift from
+      `sourceRecordId` by construction, not by convention. Both API
+      routes stopped querying `commerce_skus` entirely.
+      `selectMotherForCommerce()`/`selectCuttingForCommerce()`
+      (`app/mothers/actions.ts`/`app/cuttings/actions.ts`) dropped their
+      genus/plant-code parameters; `CommerceSkuSelectionForm.tsx` dropped
+      all genus/plant-code UI — cutting selection is now a bare
+      confirmation showing "Shopify SKU: `<exact cutting_id>`", mother
+      selection keeps only the required sale-facts fields.
+    - **What stayed exactly as item 14 built it, unchanged**: the
+      acknowledgement `plantRecordType` discriminator and its routing;
+      `mother_commerce_facts` (still required, still active, still
+      exported); RLS + `search_path` hardening pattern; `Mother_ID`/
+      `Cutting_ID` generation itself (`lib/mother-id.ts`,
+      `next_cutting_seq()`) — untouched, explicitly out of scope for this
+      correction.
+    - **Dormant, not deleted**: `genus_codes`, `plant_codes`,
+      `commerce_skus`, `commerce_mother_seq_counters`,
+      `commerce_cutting_seq_counters`, `assign_commerce_sku_for_mother/
+      cutting()`, `next_commerce_mother_seq/cutting_seq()`,
+      `forbid_commerce_sku_mutation()` + triggers, and the *original*
+      10-arg `select_mother_for_commerce()`/3-arg
+      `select_cutting_for_commerce()` — none dropped, none altered. A new
+      forward migration
+      (`supabase/migrations/20260815120000_existing_id_as_commerce_sku.sql`)
+      adds two **new, narrower overloads** under the same function names
+      (Postgres treats a different argument list as a genuinely separate
+      function) and revokes `EXECUTE` on the old overloads from every
+      role **including `service_role`**, so the app's own real access
+      path can no longer reach them either — genuinely dormant, not
+      merely unused. Caught by direct testing, not assumed: an earlier
+      draft of this migration revoked the old overloads from
+      `anon`/`authenticated` but forgot the *new* overloads also need
+      that same revoke-then-grant treatment, since Supabase's default
+      privileges auto-grant `EXECUTE` to `anon`/`authenticated` on every
+      newly created function — `anon` could otherwise still call the new,
+      narrower `select_cutting_for_commerce(text)` directly.
+    - **GM Commerce compatibility gate**: GM Commerce PR #77 merged
+      (`0b75b39aa182ec224eb495f773c42e08a5ca85dc`), post-merge CI
+      31882818782 passing 25/25, confirming GM Commerce now requires
+      exactly this corrected contract (`sku === sourceRecordId`, embedded
+      spaces preserved, no reformatting, `plantRecordType` still
+      required). GM Commerce itself was not touched by this correction.
+    - **Deployment**: implemented and verified, **deliberately not
+      deployed yet** — same draft-PR-first discipline as item 14.
+
 ## What NOT to do
 
 - Do not replicate the Sheets/Apps Script architecture itself when
