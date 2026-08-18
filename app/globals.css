@@ -461,7 +461,28 @@ label {
 
 .label-cell .id {
   font-weight: 700;
+  font-size: 8pt;
+}
+
+/* Adaptive plant-name sizing (see sizeClassForLine in lib/labels.ts for the
+   math behind these tiers) -- short names get substantially larger,
+   readable lettering; long names step down instead of overflowing, and
+   overflow-wrap on .label-cell .text (above) lets a name that still
+   doesn't fit wrap onto a second sub-line rather than being clipped. */
+.label-cell .line.size-lg {
+  font-size: 11pt;
+}
+
+.label-cell .line.size-md {
+  font-size: 9pt;
+}
+
+.label-cell .line.size-sm {
   font-size: 7.5pt;
+}
+
+.label-cell .line.size-xs {
+  font-size: 6.5pt;
 }
 
 /* On-screen only: faint outline so the sheet's real proportions are

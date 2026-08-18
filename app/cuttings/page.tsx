@@ -41,9 +41,6 @@ export default async function CuttingsPage({
           <Link className="btn" href="/cuttings/new">
             + Take Cuttings
           </Link>
-          <Link className="btn secondary" href="/api/labels/cuttings.csv">
-            Export queued → CSV
-          </Link>
           <Link className="btn secondary" href="/labels/cuttings">
             View queued labels
           </Link>

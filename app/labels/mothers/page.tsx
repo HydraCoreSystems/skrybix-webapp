@@ -1,10 +1,10 @@
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { publicPlantUrl, qrDataUri } from "@/lib/qr";
-import { clearMotherPrintQueue } from "../actions";
+import { clearMotherPrintQueue, clearPrintedMothers } from "../actions";
 import PrintButton from "@/components/PrintButton";
 import LabelStartPicker from "@/components/LabelStartPicker";
 import LabelSheets from "@/components/LabelSheets";
-import { parseStartPosition } from "@/lib/labels";
+import { parseStartPosition, sizeClassForLine } from "@/lib/labels";
 import type { MotherPlant } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -36,10 +36,10 @@ export default async function MotherLabelsPage({
         Mother Labels ({items.length} queued)
       </h3>
       <div className="no-print" style={{ marginBottom: 16 }}>
-        <PrintButton />{" "}
+        <PrintButton ids={items.map((i) => i.id)} onConfirmPrinted={clearPrintedMothers} />{" "}
         <form className="inline" action={clearMotherPrintQueue}>
           <button className="btn secondary" type="submit">
-            Clear print queue
+            Clear entire queue (manual override)
           </button>
         </form>
       </div>
@@ -57,8 +57,8 @@ export default async function MotherLabelsPage({
                 <img className="qr" src={item.qr} alt="" />
                 <div className="text">
                   <div className="id">{item.id}</div>
-                  <div className="line">{item.line1}</div>
-                  <div className="line">{item.line2}</div>
+                  <div className={`line size-${sizeClassForLine(item.line1)}`}>{item.line1}</div>
+                  <div className={`line size-${sizeClassForLine(item.line2)}`}>{item.line2}</div>
                 </div>
               </>
             )}
