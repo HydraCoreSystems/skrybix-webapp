@@ -157,14 +157,14 @@ the two silently diverging) — no separate input on `/mothers/new`
 anymore, shown read-only on the edit page like Mother ID.
 
 - `app/` — Next.js App Router pages + Server Actions (`actions.ts` per
-  route group) + API routes for CSV export
+  route group)
 - `lib/supabase.ts` — server-only Supabase client (`SUPABASE_SERVICE_ROLE_KEY`,
   never exposed to the browser). Most tables have no RLS, relying on
   nothing ever querying Supabase client-side with a non-service-role key
   — but that alone doesn't block Supabase's own default `anon`/
   `authenticated` API grants (see the commerce SKU decision record below
   for why that distinction matters and where RLS actually was added)
-- `lib/csv.ts`, `lib/qr.ts`, `lib/types.ts` — shared helpers
+- `lib/qr.ts`, `lib/types.ts` — shared helpers
 - `supabase/schema.sql` — full Postgres schema, run once against a real
   Supabase project (see below)
 - `components/Nav.tsx`, `components/PrintButton.tsx`
@@ -861,6 +861,57 @@ confirmed yet.
       required). GM Commerce itself was not touched by this correction.
     - **Deployment**: implemented and verified, **deliberately not
       deployed yet** — same draft-PR-first discipline as item 14.
+
+16. **2026-08-17: print-queue clearing, adaptive label-name sizing, and
+    obsolete CSV export removal.** Three operator-reported problems on the
+    label pages:
+    - **Print queue never cleared on print.** Root cause: `PrintButton`
+      (`components/PrintButton.tsx`) was pure `window.print()` with zero
+      connection to the database — nothing about clicking Print ever
+      touched `print_label`. The only clear mechanism was a fully separate,
+      always-blanket `clearMotherPrintQueue`/`clearCuttingPrintQueue`
+      action (`app/labels/actions.ts`) that unconditionally clears every
+      row where `print_label = true`, regardless of whether it was on the
+      batch just printed — so it could also sweep up something queued
+      *after* that print run but before the button was clicked. Identical
+      defect on both `app/labels/mothers` and `app/labels/cuttings`.
+      Fixed by making `PrintButton` accept the exact IDs on that page and,
+      after the OS print dialog closes (`afterprint`), asking Phil to
+      confirm the sheet actually printed before calling a new
+      per-ID-scoped `clearPrintedMothers`/`clearPrintedCuttings` action
+      (`.in("mother_id"/"cutting_id", ids)`, not a blanket boolean match).
+      The browser Print API has no reliable printed-vs-canceled signal
+      (`afterprint` fires either way), so the real "success" signal is
+      Phil's own explicit confirmation click, not an inferred browser
+      event — declining/ignoring it leaves the queue untouched, which is
+      the safe default. The original blanket clear actions are kept as an
+      explicit "Clear entire queue (manual override)" recovery button.
+    - **Label plant-name text too small.** `.label-cell .line` had no
+      dedicated CSS rule and inherited the cell's flat `7pt`, same as
+      every other line regardless of name length. Added
+      `sizeClassForLine()` (`lib/labels.ts`) — a character-count tier
+      (11pt / 9pt / 7.5pt / 6.5pt) sized against the tighter cutting-label
+      text budget (~1.06in, after the logo + QR + gaps) so short names get
+      substantially larger, readable lettering and long names step down
+      gradually rather than either overflowing or being forced onto one
+      crushed line — `overflow-wrap` on `.label-cell .text` already lets
+      an oversized line wrap onto a second sub-line, and the cell's
+      vertical budget (0.75in, ~0.68in after padding) has margin for that
+      even in the worst realistic case. Not yet physically test-printed
+      against real Avery 8257 stock — same caveat as item 5's original
+      sizing, verify on paper before fully trusting the exact point sizes.
+    - **Obsolete `Export queued → CSV` button removed.** Traced end to
+      end: `app/api/labels/{mothers,cuttings}.csv/route.ts` and
+      `lib/csv.ts` had exactly one caller each — the button itself on
+      `/mothers` and `/cuttings`. Nothing else in the live app (no
+      automation, no recovery path, no other route) referenced them;
+      `scripts/import-sheets-data.mjs`'s CSV handling is the unrelated
+      one-time Google-Sheets migration importer. Confirmed obsolete per
+      item 5 above (CSV/P-touch was explicitly superseded by direct
+      browser printing on 2026-07-25) and removed: both routes, `lib/csv.ts`,
+      and the two `Export queued → CSV` links. `reference/flask_prototype/`
+      still mentions a CSV export in its own README — left untouched, it's
+      preserved historical reference, not live code.
 
 ## What NOT to do
 

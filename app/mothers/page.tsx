@@ -37,9 +37,6 @@ export default async function MothersPage({
           <Link className="btn" href="/mothers/new">
             + Add Mother Plant
           </Link>
-          <Link className="btn secondary" href="/api/labels/mothers.csv">
-            Export queued → CSV
-          </Link>
           <Link className="btn secondary" href="/labels/mothers">
             View queued labels
           </Link>
