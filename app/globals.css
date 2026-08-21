@@ -464,6 +464,14 @@ label {
   font-size: 8pt;
 }
 
+/* Plant information must remain easy to read at the label's small physical
+   size. Keep the identifier as the strongest line, but give both botanical
+   lines a deliberate semibold stroke instead of the browser's light-looking
+   normal weight. */
+.label-cell .line {
+  font-weight: 600;
+}
+
 /* Adaptive plant-name sizing (see sizeClassForLine in lib/labels.ts for the
    math behind these tiers) -- short names get substantially larger,
    readable lettering; long names step down instead of overflowing, and
@@ -511,6 +519,10 @@ label {
 @media print {
   .label-cell {
     outline: none;
+    /* Never inherit pale text from the selected screen theme. Labels print on
+       white stock, so all plant information and IDs must be solid black. */
+    color: #000;
+    text-shadow: none;
   }
   .label-sheet {
     zoom: 1;

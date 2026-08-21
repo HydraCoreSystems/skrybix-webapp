@@ -56,9 +56,9 @@ export default async function MotherLabelsPage({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img className="qr" src={item.qr} alt="" />
                 <div className="text">
-                  <div className="id">{item.id}</div>
                   <div className={`line size-${sizeClassForLine(item.line1)}`}>{item.line1}</div>
                   <div className={`line size-${sizeClassForLine(item.line2)}`}>{item.line2}</div>
+                  <div className="id">{item.id}</div>
                 </div>
               </>
             )}

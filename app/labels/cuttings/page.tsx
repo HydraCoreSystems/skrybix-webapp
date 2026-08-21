@@ -58,9 +58,9 @@ export default async function CuttingLabelsPage({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img className="logo" src="/gm-logo.png" alt="" />
                 <div className="text">
-                  <div className="id">{item.id}</div>
                   <div className={`line size-${sizeClassForLine(item.line1)}`}>{item.line1}</div>
                   <div className={`line size-${sizeClassForLine(item.line2)}`}>{item.line2}</div>
+                  <div className="id">{item.id}</div>
                 </div>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img className="qr" src={item.qr} alt="" />
