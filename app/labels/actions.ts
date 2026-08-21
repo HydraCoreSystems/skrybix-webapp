@@ -13,7 +13,13 @@ import { getSupabaseServerClient } from "@/lib/supabase";
 export async function clearPrintedMothers(motherIds: string[]) {
   if (motherIds.length === 0) return;
   const supabase = getSupabaseServerClient();
-  await supabase.from("mother_plants").update({ print_label: false }).in("mother_id", motherIds);
+  const { data, error } = await supabase.rpc("skrybix_mark_mother_labels_printed", {
+    p_mother_ids: motherIds,
+  });
+  if (error) throw new Error(`Could not record printed mother labels: ${error.message}`);
+  if (data !== motherIds.length) {
+    throw new Error(`Recorded ${data} of ${motherIds.length} mother labels. Unrecorded labels remain queued.`);
+  }
   revalidatePath("/labels/mothers");
   revalidatePath("/mothers");
 }
@@ -21,7 +27,13 @@ export async function clearPrintedMothers(motherIds: string[]) {
 export async function clearPrintedCuttings(cuttingIds: string[]) {
   if (cuttingIds.length === 0) return;
   const supabase = getSupabaseServerClient();
-  await supabase.from("cuttings").update({ print_label: false }).in("cutting_id", cuttingIds);
+  const { data, error } = await supabase.rpc("skrybix_mark_cutting_labels_printed", {
+    p_cutting_ids: cuttingIds,
+  });
+  if (error) throw new Error(`Could not record printed cutting labels: ${error.message}`);
+  if (data !== cuttingIds.length) {
+    throw new Error(`Recorded ${data} of ${cuttingIds.length} cutting labels. Unrecorded labels remain queued.`);
+  }
   revalidatePath("/labels/cuttings");
   revalidatePath("/cuttings");
 }

@@ -9,6 +9,14 @@ import type { Cutting } from "@/lib/types";
 
 type CuttingRow = Cutting & { mother_plants: { display_name: string } | null };
 
+function printedLabel(cutting: Cutting) {
+  if (!cutting.label_last_printed_at) return null;
+  const when = new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(
+    new Date(cutting.label_last_printed_at)
+  );
+  return `Printed ${when} · ${cutting.label_print_count}×`;
+}
+
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
@@ -88,9 +96,10 @@ export default async function CuttingsPage({
               <td>
                 <form action={toggleCuttingField.bind(null, c.cutting_id, "print_label", !c.print_label)}>
                   <button className={`btn small ${c.print_label ? "" : "secondary"}`} type="submit">
-                    {c.print_label ? "Queued ✓" : "Queue for print"}
+                    {c.print_label ? "Queued ✓" : c.label_print_count > 0 ? "Reprint" : "Queue for print"}
                   </button>
                 </form>
+                {printedLabel(c) && <small style={{ display: "block", marginTop: 5 }}>{printedLabel(c)}</small>}
               </td>
               <td>
                 <CommerceSkuSelectionForm

@@ -8,12 +8,12 @@
 # against a real Postgres server (not reasoned about on paper):
 #
 #   1. supabase/schema.sql applies cleanly to a fresh database.
-#   2. The two forward migrations apply cleanly, in order, to a database
+#   2. All forward migrations apply cleanly, in order, to a database
 #      seeded with a frozen, checked-in pre-migration schema fixture
 #      (supabase/fixtures/pre_20260815120000_schema.sql, simulating
 #      production before this correction).
 #   3. Both paths produce a byte-identical resulting schema (parity).
-#   4. Re-applying either migration a second time is a safe no-op.
+#   4. Re-applying every migration a second time is a safe no-op.
 #   5. The access-hardening block blocks anon/authenticated and leaves
 #      service_role fully working, simulating Supabase's real
 #      default-privilege model -- for BOTH the original commerce-SKU
@@ -52,6 +52,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCHEMA_SQL="$REPO_ROOT/supabase/schema.sql"
 MIGRATION_1_SQL="$REPO_ROOT/supabase/migrations/20260813221000_commerce_sku_standardization.sql"
 MIGRATION_2_SQL="$REPO_ROOT/supabase/migrations/20260815120000_existing_id_as_commerce_sku.sql"
+MIGRATION_3_SQL="$REPO_ROOT/supabase/migrations/20260821221113_durable_label_print_history.sql"
 LEGACY_TESTS_SQL="$REPO_ROOT/supabase/commerce_sku_tests.sql"
 CORRECTION_TESTS_SQL="$REPO_ROOT/supabase/existing_id_commerce_tests.sql"
 PREFLIGHT_SQL="$REPO_ROOT/supabase/existing_id_correction_preflight.sql"
@@ -127,7 +128,7 @@ setup_supabase_roles "$FRESH_DB"
 psql_admin -d "$FRESH_DB" -f "$SCHEMA_SQL"
 pass "schema.sql applied to a fresh database with no errors"
 
-echo "=== [2/10] Upgrade path: pre-PR schema, then both forward migrations in order ==="
+echo "=== [2/10] Upgrade path: pre-PR schema, then all forward migrations in order ==="
 psql_admin -d postgres -c "drop database if exists $UPGRADE_DB;"
 psql_admin -d postgres -c "create database $UPGRADE_DB owner $PGUSER;"
 setup_supabase_roles "$UPGRADE_DB"
@@ -143,6 +144,9 @@ pass "commerce-SKU standardization migration applied cleanly"
 psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_2_SQL"
 pass "existing-ID-as-SKU correction migration applied cleanly on top of it"
 
+psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_3_SQL"
+pass "durable label-print history migration applied cleanly on top of it"
+
 echo "=== [3/10] Schema object parity between fresh and upgrade paths ==="
 FRESH_DUMP="$(mktemp)"
 UPGRADE_DUMP="$(mktemp)"
@@ -154,15 +158,16 @@ if ! diff -q "$FRESH_DUMP" "$UPGRADE_DUMP" > /dev/null; then
 fi
 pass "fresh apply and migration-upgraded schema are structurally identical"
 
-FRESH_GRANTS=$(psql -d "$FRESH_DB" -tAc "select proname || '|' || pg_get_function_identity_arguments(oid) || '|' || coalesce((select array_agg(grantee::regrole::text order by grantee::regrole::text) from aclexplode(proacl) where privilege_type='EXECUTE'), '{}') from pg_proc where proname in ('select_mother_for_commerce','select_cutting_for_commerce') order by 1;")
-UPGRADE_GRANTS=$(psql -d "$UPGRADE_DB" -tAc "select proname || '|' || pg_get_function_identity_arguments(oid) || '|' || coalesce((select array_agg(grantee::regrole::text order by grantee::regrole::text) from aclexplode(proacl) where privilege_type='EXECUTE'), '{}') from pg_proc where proname in ('select_mother_for_commerce','select_cutting_for_commerce') order by 1;")
-[ "$FRESH_GRANTS" = "$UPGRADE_GRANTS" ] || fail "EXECUTE grants on select_*_for_commerce overloads differ between fresh and upgrade paths"
-pass "EXECUTE grants on both old and new select_*_for_commerce overloads are identical between fresh and upgrade paths"
+FRESH_GRANTS=$(psql -d "$FRESH_DB" -tAc "select proname || '|' || pg_get_function_identity_arguments(oid) || '|' || coalesce((select array_agg(grantee::regrole::text order by grantee::regrole::text) from aclexplode(proacl) where privilege_type='EXECUTE'), '{}') from pg_proc where proname in ('select_mother_for_commerce','select_cutting_for_commerce','skrybix_mark_mother_labels_printed','skrybix_mark_cutting_labels_printed') order by 1;")
+UPGRADE_GRANTS=$(psql -d "$UPGRADE_DB" -tAc "select proname || '|' || pg_get_function_identity_arguments(oid) || '|' || coalesce((select array_agg(grantee::regrole::text order by grantee::regrole::text) from aclexplode(proacl) where privilege_type='EXECUTE'), '{}') from pg_proc where proname in ('select_mother_for_commerce','select_cutting_for_commerce','skrybix_mark_mother_labels_printed','skrybix_mark_cutting_labels_printed') order by 1;")
+[ "$FRESH_GRANTS" = "$UPGRADE_GRANTS" ] || fail "EXECUTE grants on application RPCs differ between fresh and upgrade paths"
+pass "EXECUTE grants on commerce and durable label-print RPCs are identical between fresh and upgrade paths"
 
-echo "=== [4/10] Migration re-apply is a safe no-op (both migrations) ==="
+echo "=== [4/10] Migration re-apply is a safe no-op (all migrations) ==="
 psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_1_SQL"
 psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_2_SQL"
-pass "re-applying both migrations a second time produced no errors"
+psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_3_SQL"
+pass "re-applying all migrations a second time produced no errors"
 
 echo "=== [5/10] Access hardening: anon/authenticated blocked, service_role works (original + corrected objects) ==="
 DENIED_TABLE=$(psql -d "$FRESH_DB" -tAc "set role anon; select count(*) from commerce_skus;" 2>&1 || true)
@@ -183,6 +188,26 @@ psql -d "$FRESH_DB" -v ON_ERROR_STOP=1 -tAc "
   select select_mother_for_commerce('HY-CIACC01','exact_plant','6in','18in',true,'ships_in_pot',null,null);
 " > /dev/null || fail "service_role (the app's real access path) was unexpectedly blocked on the corrected select_mother_for_commerce"
 pass "service_role retains full access to the corrected overloads"
+
+DENIED_LABEL_PRINT=$(psql -d "$FRESH_DB" -tAc "set role anon; select skrybix_mark_cutting_labels_printed(array['x']);" 2>&1 || true)
+echo "$DENIED_LABEL_PRINT" | grep -qi "permission denied" || fail "anon role was NOT denied EXECUTE on skrybix_mark_cutting_labels_printed"
+pass "anon role denied EXECUTE on durable label-print RPCs"
+
+psql_admin -d "$FRESH_DB" -c "
+  insert into mother_plants (mother_id, display_name, genus, species, print_label)
+  values ('HY-PRINT01','Hoya print history test','Hoya','testus', true);
+  insert into cuttings (cutting_id, mother_id, full_display_name, print_label)
+  values ('HY-PRINT01-C01','HY-PRINT01','Hoya print history test', true);
+"
+PRINTED_COUNT=$(psql -d "$FRESH_DB" -tAc "set role service_role; select skrybix_mark_cutting_labels_printed(array['HY-PRINT01-C01']);")
+[ "$PRINTED_COUNT" = "1" ] || fail "label-print RPC should update exactly one queued cutting, got '$PRINTED_COUNT'"
+PRINTED_STATE=$(psql -d "$FRESH_DB" -tAc "select (not print_label) and label_print_count = 1 and label_last_printed_at is not null from cuttings where cutting_id = 'HY-PRINT01-C01';")
+[ "$PRINTED_STATE" = "t" ] || fail "label-print RPC did not atomically clear queue and preserve print history"
+REPLAY_COUNT=$(psql -d "$FRESH_DB" -tAc "set role service_role; select skrybix_mark_cutting_labels_printed(array['HY-PRINT01-C01']);")
+[ "$REPLAY_COUNT" = "0" ] || fail "replaying a completed print should update zero rows, got '$REPLAY_COUNT'"
+REPLAY_STATE=$(psql -d "$FRESH_DB" -tAc "select label_print_count = 1 from cuttings where cutting_id = 'HY-PRINT01-C01';")
+[ "$REPLAY_STATE" = "t" ] || fail "replaying a completed print incorrectly incremented print history"
+pass "durable label-print RPC atomically records one print, clears its queue entry, and is replay-safe"
 
 echo "=== [6/10] Legacy functional/negative-path suite (dormant genus/plant-code path, run as table owner) ==="
 psql_admin -d postgres -c "drop database if exists $LEGACY_FUNCTIONAL_DB;"
