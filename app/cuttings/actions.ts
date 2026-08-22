@@ -3,7 +3,16 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import type { CommerceSelectionActionResult } from "@/lib/commerce-export";
+import {
+  computeCommerceBatch,
+  computePrintQueueBatch,
+  commerceBatchMessage,
+  printBatchMessage,
+  type CuttingBatchRow,
+} from "@/lib/cuttings-batch";
 import { getSupabaseServerClient } from "@/lib/supabase";
+
+export type BatchActionResult = { ok: true; message: string } | { ok: false; message: string };
 
 export async function createCuttings(formData: FormData) {
   const motherId = String(formData.get("mother_id") || "").trim();
@@ -106,6 +115,84 @@ export async function selectCuttingForCommerce(cuttingId: string): Promise<Comme
   revalidatePath("/cuttings");
   revalidatePath("/mothers");
   return { ok: true, sku: sku as string };
+}
+
+function dedupeIds(cuttingIds: string[]): string[] {
+  return Array.from(new Set(cuttingIds.map((s) => s.trim()).filter(Boolean)));
+}
+
+// Batch "queue for print": sets print_label = true for every selected cutting
+// in one idempotent update. The queue is a boolean flag, so a retry can never
+// create a duplicate queue entry — already-queued ids are detected and
+// reported as skipped. Returns a plain-language result (not a redirect) so the
+// client can clear its selections and show the outcome inline.
+export async function queueCuttingsForPrint(cuttingIds: string[]): Promise<BatchActionResult> {
+  const ids = dedupeIds(cuttingIds);
+  if (ids.length === 0) {
+    return { ok: false, message: "Nothing selected to queue." };
+  }
+
+  const supabase = getSupabaseServerClient();
+  const { data: rowsRaw, error } = await supabase
+    .from("cuttings")
+    .select("cutting_id, print_label, label_print_count, commerce_selected_at, commerce_acknowledged_at")
+    .in("cutting_id", ids)
+    .is("archived_at", null);
+  if (error) {
+    return { ok: false, message: `Could not queue labels: ${error.message}` };
+  }
+
+  const rows = (rowsRaw ?? []) as CuttingBatchRow[];
+  const plan = computePrintQueueBatch(ids, rows);
+
+  if (plan.toQueue.length > 0) {
+    const { error: updateErr } = await supabase
+      .from("cuttings")
+      .update({ print_label: true })
+      .in("cutting_id", plan.toQueue);
+    if (updateErr) {
+      return { ok: false, message: `Could not queue labels: ${updateErr.message}` };
+    }
+  }
+
+  revalidatePath("/cuttings");
+  revalidatePath("/labels/cuttings");
+  return { ok: true, message: printBatchMessage(plan) };
+}
+
+// Batch "send to GM Commerce": marks every selected cutting selected for GM
+// Commerce. select_cutting_for_commerce is idempotent (only sets
+// commerce_selected_at when null), so retries are safe and already-selected
+// ids are reported as skipped.
+export async function sendCuttingsToCommerce(cuttingIds: string[]): Promise<BatchActionResult> {
+  const ids = dedupeIds(cuttingIds);
+  if (ids.length === 0) {
+    return { ok: false, message: "Nothing selected to send." };
+  }
+
+  const supabase = getSupabaseServerClient();
+  const { data: rowsRaw, error } = await supabase
+    .from("cuttings")
+    .select("cutting_id, print_label, label_print_count, commerce_selected_at, commerce_acknowledged_at")
+    .in("cutting_id", ids)
+    .is("archived_at", null);
+  if (error) {
+    return { ok: false, message: `Could not send cuttings: ${error.message}` };
+  }
+
+  const rows = (rowsRaw ?? []) as CuttingBatchRow[];
+  const plan = computeCommerceBatch(ids, rows);
+
+  for (const id of plan.toSelect) {
+    const { error: rpcErr } = await supabase.rpc("select_cutting_for_commerce", { p_cutting_id: id });
+    if (rpcErr) {
+      return { ok: false, message: `Could not send ${id} to GM Commerce: ${rpcErr.message}` };
+    }
+  }
+
+  revalidatePath("/cuttings");
+  revalidatePath("/mothers");
+  return { ok: true, message: commerceBatchMessage(plan) };
 }
 
 export async function pushSoldToOutgoingLog() {

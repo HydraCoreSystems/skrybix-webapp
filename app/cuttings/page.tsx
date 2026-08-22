@@ -1,20 +1,27 @@
 import Link from "next/link";
-import { CommerceSkuSelectionForm } from "@/components/CommerceSkuSelectionForm";
-import { getCommerceHandoffState } from "@/lib/commerce-export";
 import { getSupabaseServerClient } from "@/lib/supabase";
-import { toggleCuttingField, pushSoldToOutgoingLog } from "./actions";
+import { pushSoldToOutgoingLog } from "./actions";
 import { matchesQuery } from "@/lib/search";
 import SearchBox from "@/components/SearchBox";
+import CuttingsBatchTable, { type CuttingsTableRow } from "@/components/CuttingsBatchTable";
 import type { Cutting } from "@/lib/types";
 
 type CuttingRow = Cutting & { mother_plants: { display_name: string } | null };
 
-function printedLabel(cutting: Cutting) {
-  if (!cutting.label_last_printed_at) return null;
-  const when = new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(
-    new Date(cutting.label_last_printed_at)
-  );
-  return `Printed ${when} · ${cutting.label_print_count}×`;
+function toTableRow(c: CuttingRow): CuttingsTableRow {
+  return {
+    cutting_id: c.cutting_id,
+    motherDisplayName: c.mother_plants?.display_name ?? null,
+    motherId: c.mother_id,
+    dateTaken: c.date_taken,
+    print_label: c.print_label,
+    label_print_count: c.label_print_count,
+    label_last_printed_at: c.label_last_printed_at,
+    sold: c.sold,
+    scan_count: c.scan_count,
+    commerce_selected_at: c.commerce_selected_at,
+    commerce_acknowledged_at: c.commerce_acknowledged_at,
+  };
 }
 
 export const dynamic = "force-dynamic";
@@ -37,6 +44,8 @@ export default async function CuttingsPage({
   }
   const allRows = (rowsRaw ?? []) as CuttingRow[];
   const q = searchParams.q ?? "";
+  // "Visible" for the batch "select all visible" controls is exactly this
+  // filtered subset (after search), never the whole database.
   const rows = allRows.filter((c) => matchesQuery([c.cutting_id, c.mother_id, c.mother_plants?.display_name], q));
 
   return (
@@ -66,53 +75,7 @@ export default async function CuttingsPage({
         </p>
       )}
 
-      <table>
-        <thead>
-          <tr>
-            <th>Cutting ID</th>
-            <th>Mother</th>
-            <th>Date Taken</th>
-            <th>Sold?</th>
-            <th>Print?</th>
-            <th>GM Commerce</th>
-            <th>Scans</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((c) => (
-            <tr key={c.cutting_id}>
-              <td>{c.cutting_id}</td>
-              <td>
-                {c.mother_plants?.display_name} ({c.mother_id})
-              </td>
-              <td>{c.date_taken}</td>
-              <td>
-                <form action={toggleCuttingField.bind(null, c.cutting_id, "sold", !c.sold)}>
-                  <button className={`btn small ${c.sold ? "" : "secondary"}`} type="submit">
-                    {c.sold ? "Sold ✓" : "Mark sold"}
-                  </button>
-                </form>
-              </td>
-              <td>
-                <form action={toggleCuttingField.bind(null, c.cutting_id, "print_label", !c.print_label)}>
-                  <button className={`btn small ${c.print_label ? "" : "secondary"}`} type="submit">
-                    {c.print_label ? "Queued ✓" : c.label_print_count > 0 ? "Reprint" : "Queue for print"}
-                  </button>
-                </form>
-                {printedLabel(c) && <small style={{ display: "block", marginTop: 5 }}>{printedLabel(c)}</small>}
-              </td>
-              <td>
-                <CommerceSkuSelectionForm
-                  recordId={c.cutting_id}
-                  kind="cutting"
-                  initialState={getCommerceHandoffState(c)}
-                />
-              </td>
-              <td>{c.scan_count}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <CuttingsBatchTable rows={rows.map(toTableRow)} />
     </div>
   );
 }
