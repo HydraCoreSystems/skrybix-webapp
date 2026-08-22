@@ -40,8 +40,6 @@ create table if not exists mother_plants (
   botanical_line1  text,
   botanical_line2  text,
   print_label      boolean not null default false,
-  label_print_count integer not null default 0 constraint mother_plants_label_print_count_nonnegative check (label_print_count >= 0),
-  label_last_printed_at timestamptz,
   created_at       timestamptz not null default now(),
   -- real columns found on the live Mother_Plants tab, not in Skrybix_FIXED_v2.gs
   form_code        text,
@@ -62,7 +60,12 @@ create table if not exists mother_plants (
   -- always report state as "active" or "sold", never "archived".
   sold                      boolean not null default false,
   commerce_selected_at      timestamptz,
-  commerce_acknowledged_at  timestamptz
+  commerce_acknowledged_at  timestamptz,
+  -- Durable label-print history, added last so the column order matches the
+  -- upgrade path (frozen pre-migration fixture + the forward migration that
+  -- APPENDS these two columns) -- required for the CI schema-parity check.
+  label_print_count integer not null default 0 constraint mother_plants_label_print_count_nonnegative check (label_print_count >= 0),
+  label_last_printed_at timestamptz
 );
 
 -- Safe to apply to the production table that existed before these
@@ -141,13 +144,16 @@ create table if not exists cuttings (
   date_taken         date,
   sold               boolean not null default false,
   print_label        boolean not null default false,
-  label_print_count  integer not null default 0 constraint cuttings_label_print_count_nonnegative check (label_print_count >= 0),
-  label_last_printed_at timestamptz,
   archived_at        timestamptz,
   created_at         timestamptz not null default now(),
   scan_count         int not null default 0,
   commerce_selected_at    timestamptz,
-  commerce_acknowledged_at timestamptz
+  commerce_acknowledged_at timestamptz,
+  -- Durable label-print history, added last so the column order matches the
+  -- upgrade path (frozen pre-migration fixture + the forward migration that
+  -- APPENDS these two columns) -- required for the CI schema-parity check.
+  label_print_count  integer not null default 0 constraint cuttings_label_print_count_nonnegative check (label_print_count >= 0),
+  label_last_printed_at timestamptz
 );
 
 -- These ALTER statements make the selection handoff safe to apply to the
@@ -729,7 +735,7 @@ as $$
 declare
   v_updated integer;
 begin
-  update mother_plants
+  update public.mother_plants
   set print_label = false,
       label_print_count = label_print_count + 1,
       label_last_printed_at = now()
@@ -750,7 +756,7 @@ as $$
 declare
   v_updated integer;
 begin
-  update cuttings
+  update public.cuttings
   set print_label = false,
       label_print_count = label_print_count + 1,
       label_last_printed_at = now()
