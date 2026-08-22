@@ -1042,6 +1042,28 @@ label {
   }
 }
 
+.mother-filters { grid-template-columns: minmax(240px, 1.6fr) minmax(170px, 1fr) minmax(150px, .8fr) auto auto; }
+.mother-worklist { display: grid; gap: 12px; }
+.mother-worklist-card { padding: 18px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+.mother-identity, .mother-status-row, .mother-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.mother-identity strong, .mother-identity code { display: block; }
+.mother-identity strong { font-size: 18px; }
+.mother-identity code { margin-top: 4px; color: var(--green-mid); }
+.mother-facts { display: grid; grid-template-columns: minmax(150px, .5fr) minmax(260px, 1.5fr); gap: 16px; margin: 16px 0; padding: 12px 0; border-block: 1px solid var(--border); }
+.mother-facts span, .mother-status-row > div { display: grid; gap: 4px; }
+.mother-facts small { color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.mother-status-row { justify-content: flex-start; margin-bottom: 14px; }
+.mother-status-row > div > small { color: var(--muted); }
+.mother-card-actions { justify-content: flex-start; }
+.mother-card-actions form { margin: 0; }
+.mother-commerce { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.mother-commerce summary { color: var(--green-mid); cursor: pointer; font-weight: 700; }
+.mother-commerce > label, .mother-commerce > span { display: inline-block; margin-top: 12px; }
+
+@media (max-width: 900px) {
+  .mother-filters, .mother-facts { grid-template-columns: 1fr; }
+}
+
 /* Avery 8257 label sheet (0.75in x 2.25in, 30/sheet, 3 cols x 10 rows on
    US Letter). Margins/gaps below are the OnlineLabels OL6950 product's
    CONFIRMED exact spec for the identical label footprint -- a real,
