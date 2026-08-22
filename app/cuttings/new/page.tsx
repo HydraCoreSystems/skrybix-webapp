@@ -4,7 +4,7 @@ import type { MotherPlant } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewCuttingPage({ searchParams }: { searchParams: { error?: string } }) {
+export default async function NewCuttingPage({ searchParams }: { searchParams: { error?: string; mother?: string } }) {
   const supabase = getSupabaseServerClient();
   const { data: mothersRaw, error: mothersError } = await supabase
     .from("mother_plants")
@@ -28,7 +28,7 @@ export default async function NewCuttingPage({ searchParams }: { searchParams: {
       {searchParams.error && <div className="flash error">{searchParams.error}</div>}
       <form action={createCuttings}>
         <label>Mother Plant</label>
-        <select name="mother_id" required>
+        <select name="mother_id" required defaultValue={searchParams.mother}>
           {mothers.map((m) => (
             <option key={m.mother_id} value={m.mother_id}>
               {m.mother_id} — {m.display_name}
