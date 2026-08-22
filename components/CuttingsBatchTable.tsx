@@ -15,6 +15,11 @@ export interface CuttingsTableRow extends CuttingBatchRow {
   dateTaken: string | null;
   label_last_printed_at: string | null;
   sold: boolean;
+  // scan_count (the aggregate QR-label scan total) is retained on the data
+  // model and passed through, but is intentionally NOT rendered: newly printed
+  // labels link directly to Instagram, so they never hit Skrybix's counting
+  // route and cannot increment this counter. The counter is kept only for
+  // legacy labels that still carry the old Skrybix-URL QR. Presentation-only.
   scan_count: number;
 }
 
@@ -166,7 +171,10 @@ export default function CuttingsBatchTable({ rows }: { rows: CuttingsTableRow[] 
                 />
               </span>
             </th>
-            <th>Label Scans</th>
+            {/* "Label Scans" column is intentionally absent: newly printed
+                labels link directly to Instagram, so scan_count cannot
+                increment. scan_count remains on the row model for legacy
+                labels; see the CuttingsTableRow comment. */}
           </tr>
         </thead>
         <tbody>
@@ -221,7 +229,6 @@ export default function CuttingsBatchTable({ rows }: { rows: CuttingsTableRow[] 
                     <span>Selected for GM Commerce</span>
                   )}
                 </td>
-                <td>{c.scan_count}</td>
               </tr>
             );
           })}
