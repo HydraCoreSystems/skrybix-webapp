@@ -1,19 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-// The browser's Print API has no reliable "the user actually printed (vs.
-// hit Cancel)" signal -- `afterprint` fires either way, in every browser,
-// by design (MDN is explicit about this). Auto-clearing the print queue on
-// `afterprint` alone would violate "failed print -> remain queued/retryable"
-// every time Phil cancels the OS print dialog (wrong printer selected, out
-// of paper noticed at the last second, etc.).
-//
-// So the real "it printed" signal here is Phil's own explicit confirmation,
-// surfaced right after the dialog closes (via `afterprint`) rather than
-// buried behind a separate button he has to remember to go find. Ignoring
-// the prompt (closing the tab, navigating away) leaves the queue exactly as
-// it was -- the safe default is "still queued", never "assume it printed".
+// Browsers cannot report whether the native print dialog completed or was
+// cancelled. For this owner-operated workflow, closing the dialog is treated
+// as completion: it removes the exact displayed batch from the queue and
+// records a durable timestamp/count. A failed database update leaves the
+// batch queued and surfaces an error.
 export default function PrintButton({
   ids,
   onConfirmPrinted,
@@ -21,21 +14,11 @@ export default function PrintButton({
   ids: string[];
   onConfirmPrinted: (ids: string[]) => Promise<void>;
 }) {
-  const [awaitingConfirm, setAwaitingConfirm] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
 
-  useEffect(() => {
-    function handleAfterPrint() {
-      setAwaitingConfirm(true);
-    }
-    window.addEventListener("afterprint", handleAfterPrint);
-    return () => window.removeEventListener("afterprint", handleAfterPrint);
-  }, []);
-
-  async function handleConfirm(printed: boolean) {
-    setAwaitingConfirm(false);
-    if (!printed) return;
+  async function handlePrint() {
+    window.print();
     setConfirming(true);
     setConfirmError(null);
     try {
@@ -53,25 +36,11 @@ export default function PrintButton({
         className="btn"
         type="button"
         disabled={ids.length === 0 || confirming}
-        onClick={() => window.print()}
+        onClick={handlePrint}
       >
-        Print
+        {confirming ? "Recording print…" : "Print labels"}
       </button>
-      {awaitingConfirm && (
-        <span
-          role="alert"
-          style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
-        >
-          <span>Did that print correctly?</span>
-          <button className="btn small" type="button" onClick={() => handleConfirm(true)}>
-            Yes, clear {ids.length} from queue
-          </button>
-          <button className="btn small secondary" type="button" onClick={() => handleConfirm(false)}>
-            No / keep queued
-          </button>
-        </span>
-      )}
-      {confirming && <span>Updating queue…</span>}
+      <small>Closing the print dialog records this batch as printed.</small>
       {confirmError && (
         <span role="alert" className="flash error" style={{ padding: "4px 10px" }}>
           {confirmError}

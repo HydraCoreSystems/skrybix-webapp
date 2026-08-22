@@ -12,6 +12,8 @@ export type MotherPlant = {
   botanical_line1: string | null;
   botanical_line2: string | null;
   print_label: boolean;
+  label_print_count: number;
+  label_last_printed_at: string | null;
   created_at: string;
   form_code: string | null;
   name_type: string | null;
@@ -37,6 +39,8 @@ export type Cutting = {
   date_taken: string | null;
   sold: boolean;
   print_label: boolean;
+  label_print_count: number;
+  label_last_printed_at: string | null;
   archived_at: string | null;
   created_at: string;
   scan_count: number;

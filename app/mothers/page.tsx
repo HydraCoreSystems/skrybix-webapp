@@ -11,6 +11,14 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
+function printedLabel(mother: MotherPlant) {
+  if (!mother.label_last_printed_at) return null;
+  const when = new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(
+    new Date(mother.label_last_printed_at)
+  );
+  return `Printed ${when} · ${mother.label_print_count}×`;
+}
+
 export default async function MothersPage({
   searchParams,
 }: {
@@ -84,9 +92,10 @@ export default async function MothersPage({
               <td>
                 <form action={toggleMotherField.bind(null, m.mother_id, "print_label", !m.print_label)}>
                   <button className={`btn small ${m.print_label ? "" : "secondary"}`} type="submit">
-                    {m.print_label ? "Queued ✓" : "Queue for print"}
+                    {m.print_label ? "Queued ✓" : m.label_print_count > 0 ? "Reprint" : "Queue for print"}
                   </button>
                 </form>
+                {printedLabel(m) && <small style={{ display: "block", marginTop: 5 }}>{printedLabel(m)}</small>}
               </td>
               <td>
                 <CommerceSkuSelectionForm

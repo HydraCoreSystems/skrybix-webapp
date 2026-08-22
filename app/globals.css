@@ -288,6 +288,38 @@ form.inline {
   display: inline;
 }
 
+/* Cuttings batch actions — two visually distinct batch buttons above the
+   table, plus compact checkbox labels and header "select all visible"
+   controls. The Print and GM Commerce selections are independent. */
+.batch-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.batch-col-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.batch-col-head input[type="checkbox"] {
+  margin: 0;
+}
+
+label.checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+label.checkbox-row input[type="checkbox"] {
+  margin: 0;
+}
+
 input,
 select {
   padding: 7px 10px;

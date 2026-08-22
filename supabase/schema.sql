@@ -60,7 +60,12 @@ create table if not exists mother_plants (
   -- always report state as "active" or "sold", never "archived".
   sold                      boolean not null default false,
   commerce_selected_at      timestamptz,
-  commerce_acknowledged_at  timestamptz
+  commerce_acknowledged_at  timestamptz,
+  -- Durable label-print history, added last so the column order matches the
+  -- upgrade path (frozen pre-migration fixture + the forward migration that
+  -- APPENDS these two columns) -- required for the CI schema-parity check.
+  label_print_count integer not null default 0 constraint mother_plants_label_print_count_nonnegative check (label_print_count >= 0),
+  label_last_printed_at timestamptz
 );
 
 -- Safe to apply to the production table that existed before these
@@ -143,7 +148,12 @@ create table if not exists cuttings (
   created_at         timestamptz not null default now(),
   scan_count         int not null default 0,
   commerce_selected_at    timestamptz,
-  commerce_acknowledged_at timestamptz
+  commerce_acknowledged_at timestamptz,
+  -- Durable label-print history, added last so the column order matches the
+  -- upgrade path (frozen pre-migration fixture + the forward migration that
+  -- APPENDS these two columns) -- required for the CI schema-parity check.
+  label_print_count  integer not null default 0 constraint cuttings_label_print_count_nonnegative check (label_print_count >= 0),
+  label_last_printed_at timestamptz
 );
 
 -- These ALTER statements make the selection handoff safe to apply to the
@@ -711,6 +721,69 @@ begin
     grant execute on function assign_commerce_sku_for_cutting(text, character, text) to service_role;
     grant execute on function select_mother_for_commerce(text, character, text, text, text, text, boolean, text, text, text) to service_role;
     grant execute on function select_cutting_for_commerce(text, character, text) to service_role;
+  end if;
+end $$;
+
+-- Durable label-print history. The queue flag remains a work queue; these
+-- fields preserve when each plant label was last printed and how many times.
+create or replace function skrybix_mark_mother_labels_printed(p_mother_ids text[])
+returns integer
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_updated integer;
+begin
+  update public.mother_plants
+  set print_label = false,
+      label_print_count = label_print_count + 1,
+      label_last_printed_at = now()
+  where mother_id = any(p_mother_ids)
+    and print_label = true;
+
+  get diagnostics v_updated = row_count;
+  return v_updated;
+end;
+$$;
+
+create or replace function skrybix_mark_cutting_labels_printed(p_cutting_ids text[])
+returns integer
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_updated integer;
+begin
+  update public.cuttings
+  set print_label = false,
+      label_print_count = label_print_count + 1,
+      label_last_printed_at = now()
+  where cutting_id = any(p_cutting_ids)
+    and print_label = true;
+
+  get diagnostics v_updated = row_count;
+  return v_updated;
+end;
+$$;
+
+revoke all on function skrybix_mark_mother_labels_printed(text[]) from public;
+revoke all on function skrybix_mark_cutting_labels_printed(text[]) from public;
+
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'anon') then
+    revoke all on function skrybix_mark_mother_labels_printed(text[]) from anon;
+    revoke all on function skrybix_mark_cutting_labels_printed(text[]) from anon;
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'authenticated') then
+    revoke all on function skrybix_mark_mother_labels_printed(text[]) from authenticated;
+    revoke all on function skrybix_mark_cutting_labels_printed(text[]) from authenticated;
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant execute on function skrybix_mark_mother_labels_printed(text[]) to service_role;
+    grant execute on function skrybix_mark_cutting_labels_printed(text[]) to service_role;
   end if;
 end $$;
 
