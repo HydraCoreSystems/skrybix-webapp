@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { logNonSaleOutgoing, queueCuttingsForPrint, sendCuttingsToCommerce, toggleCuttingField } from "@/app/cuttings/actions";
 import {
+  cuttingPrintState,
   isCommerceSelectable,
   isOutgoingSelectable,
   isPrintSelectable,
@@ -303,14 +304,15 @@ export default function CuttingsBatchTable({ rows }: { rows: CuttingsTableRow[] 
                         checked={printSel.has(c.cutting_id)}
                         onChange={() => togglePrint(c.cutting_id)}
                       />{" "}
-                      Queue
+                      {cuttingPrintState(c) === "reprintable" ? "Reprint" : "Queue"}
                     </label>
-                  ) : c.print_label ? (
-                    <span>Queued ✓</span>
                   ) : (
-                    <span>{history ?? "Printed"}</span>
+                    // The only non-selectable print state is "queued" -- a
+                    // prior print history no longer makes a row permanently
+                    // ineligible (see cuttingPrintState in lib/cuttings-batch.ts).
+                    <span>Queued ✓</span>
                   )}
-                  {c.print_label && history && <small style={{ display: "block", marginTop: 5 }}>{history}</small>}
+                  {history && <small style={{ display: "block", marginTop: 5 }}>{history}</small>}
                 </td>
                 <td>
                   {isCommerceSelectable(c) ? (

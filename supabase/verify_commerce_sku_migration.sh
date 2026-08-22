@@ -230,6 +230,29 @@ REPLAY_STATE=$(psql -d "$FRESH_DB" -tAc "select label_print_count = 1 from cutti
 [ "$REPLAY_STATE" = "t" ] || fail "replaying a completed print incorrectly incremented print history"
 pass "durable label-print RPC atomically records one print, clears its queue entry, and is replay-safe"
 
+# Reprint cycle (production bug fix, 2026-08-22): a previously-printed
+# cutting must remain eligible to be queued and printed again -- see
+# isPrintSelectable/cuttingPrintState in lib/cuttings-batch.ts. Simulate
+# Phil re-queuing HY-PRINT01-C01 (already at label_print_count = 1 from
+# above) and confirming a second print: label_print_count must go from
+# 1x to 2x, label_last_printed_at must advance to the new confirmation
+# time (not stay frozen at the first print), and the replay/idempotency
+# guarantee must hold at this new count too, not just at count 0->1.
+FIRST_PRINTED_AT=$(psql -d "$FRESH_DB" -tAc "select label_last_printed_at from cuttings where cutting_id = 'HY-PRINT01-C01';")
+psql_admin -d "$FRESH_DB" -c "update cuttings set print_label = true where cutting_id = 'HY-PRINT01-C01';"
+REPRINT_COUNT=$(psql -d "$FRESH_DB" -tAc "set role service_role; select skrybix_mark_cutting_labels_printed(array['HY-PRINT01-C01']);" | tail -1)
+[ "$REPRINT_COUNT" = "1" ] || fail "reprint confirmation should update exactly one re-queued cutting, got '$REPRINT_COUNT'"
+REPRINT_STATE=$(psql -d "$FRESH_DB" -tAc "
+  select (not print_label) and label_print_count = 2 and label_last_printed_at > '$FIRST_PRINTED_AT'::timestamptz
+  from cuttings where cutting_id = 'HY-PRINT01-C01';
+")
+[ "$REPRINT_STATE" = "t" ] || fail "reprint confirmation did not increment label_print_count from 1x to 2x and advance label_last_printed_at"
+REPRINT_REPLAY_COUNT=$(psql -d "$FRESH_DB" -tAc "set role service_role; select skrybix_mark_cutting_labels_printed(array['HY-PRINT01-C01']);" | tail -1)
+[ "$REPRINT_REPLAY_COUNT" = "0" ] || fail "replaying a completed reprint should update zero rows, got '$REPRINT_REPLAY_COUNT'"
+REPRINT_REPLAY_STATE=$(psql -d "$FRESH_DB" -tAc "select label_print_count = 2 from cuttings where cutting_id = 'HY-PRINT01-C01';")
+[ "$REPRINT_REPLAY_STATE" = "t" ] || fail "replaying a completed reprint incorrectly changed print history"
+pass "reprint confirmation increments label_print_count from 1x to 2x, advances label_last_printed_at, and is replay-safe at that count too"
+
 echo "=== [6/10] Legacy functional/negative-path suite (dormant genus/plant-code path, run as table owner) ==="
 psql_admin -d postgres -c "drop database if exists $LEGACY_FUNCTIONAL_DB;"
 psql_admin -d postgres -c "create database $LEGACY_FUNCTIONAL_DB owner $PGUSER;"

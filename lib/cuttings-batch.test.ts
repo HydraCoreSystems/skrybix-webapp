@@ -25,12 +25,35 @@ function row(overrides: Partial<CuttingBatchRow>): CuttingBatchRow {
   };
 }
 
-test("cuttingPrintState: only never-queued-and-never-printed rows are selectable", () => {
+// Production bug fix (2026-08-22): a previously-printed cutting used to be
+// PERMANENTLY excluded from the print queue (isPrintSelectable returned
+// false forever once label_print_count > 0), with no way back to
+// selectable even though real labels sometimes need a legitimate reprint
+// (alignment, printer, or physical label damage). The only state that
+// makes a row ineligible is being CURRENTLY queued -- prior print history
+// only changes the button's label, never its eligibility. The tests below
+// cover the corrected behavior; see cuttingPrintState in cuttings-batch.ts.
+
+test("cuttingPrintState: initial print -- a never-printed, unqueued row is selectable (Queue)", () => {
   assert.equal(cuttingPrintState({ print_label: false, label_print_count: 0 }), "selectable");
+  assert.equal(isPrintSelectable({ print_label: false, label_print_count: 0 }), true);
+});
+
+test("cuttingPrintState: reprint eligibility -- a previously-printed, unqueued row stays selectable (Reprint)", () => {
+  assert.equal(cuttingPrintState({ print_label: false, label_print_count: 1 }), "reprintable");
+  assert.equal(isPrintSelectable({ print_label: false, label_print_count: 1 }), true);
+  // Eligibility doesn't cap out after one reprint either.
+  assert.equal(cuttingPrintState({ print_label: false, label_print_count: 5 }), "reprintable");
+  assert.equal(isPrintSelectable({ print_label: false, label_print_count: 5 }), true);
+});
+
+test("cuttingPrintState: already-queued exclusion -- a queued row is never selectable, regardless of print history", () => {
   assert.equal(cuttingPrintState({ print_label: true, label_print_count: 0 }), "queued");
-  assert.equal(cuttingPrintState({ print_label: false, label_print_count: 2 }), "printed");
   assert.equal(isPrintSelectable({ print_label: true, label_print_count: 0 }), false);
-  assert.equal(isPrintSelectable({ print_label: false, label_print_count: 1 }), false);
+  // A row can be queued again after prior prints -- still not selectable
+  // while that queue entry is live.
+  assert.equal(cuttingPrintState({ print_label: true, label_print_count: 3 }), "queued");
+  assert.equal(isPrintSelectable({ print_label: true, label_print_count: 3 }), false);
 });
 
 test("cuttingCommerceState: acknowledged > selected > selectable", () => {
@@ -69,6 +92,14 @@ test("computePrintQueueBatch: retrying never creates duplicate queue entries", (
   assert.deepEqual(retry.alreadyQueued, ["C1", "C2", "C3"]);
 });
 
+test("computePrintQueueBatch: a previously-printed, unqueued cutting can be re-queued for reprint", () => {
+  const rows = [row({ cutting_id: "C1", print_label: false, label_print_count: 1 })];
+  const plan = computePrintQueueBatch(["C1"], rows);
+  assert.deepEqual(plan.toQueue, ["C1"]);
+  assert.deepEqual(plan.alreadyQueued, []);
+  assert.deepEqual(plan.skipped, []);
+});
+
 test("computePrintQueueBatch: unknown ids are skipped, not queued", () => {
   const rows = [row({ cutting_id: "C1" })];
   const plan = computePrintQueueBatch(["C1", "MISSING"], rows);
@@ -90,6 +121,16 @@ test("toggleSelectAllVisible: selects all selectable visible rows for print", ()
   const visible = [row({ cutting_id: "C1" }), row({ cutting_id: "C2" }), row({ cutting_id: "C3", print_label: true })];
   const next = toggleSelectAllVisible(visible, new Set(), "print");
   // C3 is already queued -> not selectable -> excluded.
+  assert.deepEqual([...next].sort(), ["C1", "C2"]);
+});
+
+test("toggleSelectAllVisible: select-all-visible for print includes eligible reprints, excludes queued rows", () => {
+  const visible = [
+    row({ cutting_id: "C1", print_label: false, label_print_count: 0 }), // never printed
+    row({ cutting_id: "C2", print_label: false, label_print_count: 1 }), // reprintable
+    row({ cutting_id: "C3", print_label: true, label_print_count: 1 }), // currently queued -> excluded
+  ];
+  const next = toggleSelectAllVisible(visible, new Set(), "print");
   assert.deepEqual([...next].sort(), ["C1", "C2"]);
 });
 

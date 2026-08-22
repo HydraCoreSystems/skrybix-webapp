@@ -17,7 +17,7 @@
 export const NON_SALE_OUTGOING_REASONS = ["Gift", "Loss", "Disposal", "Trade", "Personal Use", "Other"] as const;
 export type NonSaleOutgoingReason = (typeof NON_SALE_OUTGOING_REASONS)[number];
 
-export type CuttingPrintState = "selectable" | "queued" | "printed";
+export type CuttingPrintState = "selectable" | "reprintable" | "queued";
 
 export type CuttingCommerceState = "selectable" | "selected" | "acknowledged";
 
@@ -32,12 +32,21 @@ export interface CuttingBatchRow {
 
 // ---- Per-row status -------------------------------------------------------
 
-/** Print status: only never-queued-and-never-printed rows get an active
- *  checkbox; already-queued (Queued) and previously-printed (Printed) rows
- *  must show an honest status instead of a selectable control. */
+// Production bug fix (2026-08-22): a previously-printed cutting used to be
+// PERMANENTLY excluded from the print queue -- once label_print_count > 0,
+// isPrintSelectable returned false forever, with no path back to
+// selectable. Real labels sometimes need a legitimate reprint (alignment,
+// printer, or physical label damage), so print history must never be a
+// one-way gate. The only state that makes a row ineligible is being
+// CURRENTLY queued (print_label = true) -- prior print history changes the
+// button's label ("Reprint" instead of "Queue"), never its eligibility.
+/** Print status: any row not currently queued is selectable -- "selectable"
+ *  (never printed before) and "reprintable" (printed before, eligible for
+ *  a reprint) both get an active checkbox; only "queued" (already
+ *  print_label = true) shows an honest non-interactive status instead. */
 export function cuttingPrintState(c: Pick<CuttingBatchRow, "print_label" | "label_print_count">): CuttingPrintState {
   if (c.print_label) return "queued";
-  if (c.label_print_count > 0) return "printed";
+  if (c.label_print_count > 0) return "reprintable";
   return "selectable";
 }
 
@@ -50,7 +59,8 @@ export function cuttingCommerceState(
 }
 
 export function isPrintSelectable(c: Pick<CuttingBatchRow, "print_label" | "label_print_count">): boolean {
-  return cuttingPrintState(c) === "selectable";
+  const state = cuttingPrintState(c);
+  return state === "selectable" || state === "reprintable";
 }
 
 export function isCommerceSelectable(
