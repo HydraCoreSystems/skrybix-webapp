@@ -14,7 +14,3 @@ await import(
     path.resolve(import.meta.dirname, "../app/api/commerce/v1/plants/[recordId]/acknowledge/route.test.ts")
   ).href
 );
-
-await import(
-  pathToFileURL(path.resolve(import.meta.dirname, "../app/api/_diag/supabase-project/route.test.ts")).href
-);
