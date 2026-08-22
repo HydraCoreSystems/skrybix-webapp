@@ -81,30 +81,30 @@ export default async function DashboardPage() {
   return (
     <>
       <div className="stat-grid">
-        <div className="stat">
+        <Link className="stat stat-link" href="/mothers">
           <div className="num">{motherCount ?? 0}</div>
           <div className="label">Mother Plants</div>
-        </div>
-        <div className="stat">
+        </Link>
+        <Link className="stat stat-link" href="/cuttings">
           <div className="num">{cuttingCount ?? 0}</div>
           <div className="label">Active Cuttings</div>
-        </div>
-        <div className="stat">
+        </Link>
+        <Link className="stat stat-link" href="/cuttings?status=sold">
           <div className="num">{soldPending ?? 0}</div>
-          <div className="label">Marked Sold (pending push)</div>
-        </div>
-        <div className="stat">
+          <div className="label">Marked Sold (needs review)</div>
+        </Link>
+        <Link className="stat stat-link" href="/outgoing">
           <div className="num">{outgoingCount ?? 0}</div>
           <div className="label">Outgoing Log Entries</div>
-        </div>
-        <div className="stat">
+        </Link>
+        <Link className="stat stat-link" href="/labels/mothers">
           <div className="num">{printMothers ?? 0}</div>
           <div className="label">Mother Labels Queued</div>
-        </div>
-        <div className="stat">
+        </Link>
+        <Link className="stat stat-link" href="/cuttings?status=labels">
           <div className="num">{printCuttings ?? 0}</div>
           <div className="label">Cutting Labels Queued</div>
-        </div>
+        </Link>
       </div>
 
       <div className="card">
@@ -124,7 +124,7 @@ export default async function DashboardPage() {
               {recentOutgoing.map((r) => (
                 <tr key={r.id}>
                   <td>{r.date_out}</td>
-                  <td>{r.cutting_id}</td>
+                  <td><Link href={`/outgoing?q=${encodeURIComponent(r.cutting_id)}`}>{r.cutting_id}</Link></td>
                   <td>{r.full_display_name}</td>
                   <td>{r.qty}</td>
                   <td>{r.reason}</td>
@@ -144,14 +144,14 @@ export default async function DashboardPage() {
           authenticated export API already uses. No new access is granted to GM Commerce by this view.
         </p>
         <div className="stat-grid">
-          <div className="stat">
+          <Link className="stat stat-link" href="/cuttings?status=commerce-waiting">
             <div className="num">{commerceHealth.waitingCount}</div>
             <div className="label">Selected, waiting on GM Commerce</div>
-          </div>
-          <div className="stat">
+          </Link>
+          <Link className="stat stat-link" href="/cuttings?status=commerce-waiting">
             <div className="num">{commerceHealth.waitingLongCount}</div>
             <div className="label">Waiting unusually long (48h+)</div>
-          </div>
+          </Link>
           <div className="stat">
             <div className="num">{commerceHealth.acknowledgedCount}</div>
             <div className="label">Acknowledged / received (all time)</div>
@@ -169,7 +169,7 @@ export default async function DashboardPage() {
             <tbody>
               {commerceHealth.waitingLongRecords.map((r) => (
                 <tr key={`${r.plantRecordType}-${r.sourceRecordId}`}>
-                  <td>{r.sourceRecordId}</td>
+                  <td><Link href={r.plantRecordType === "cutting" ? `/cuttings?q=${encodeURIComponent(r.sourceRecordId)}` : `/mothers?q=${encodeURIComponent(r.sourceRecordId)}`}>{r.sourceRecordId}</Link></td>
                   <td>{r.plantRecordType}</td>
                   <td>{new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(r.commerceSelectedAt as string))}</td>
                 </tr>

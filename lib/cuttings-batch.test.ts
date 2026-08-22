@@ -9,8 +9,11 @@ import {
   isCommerceSelectable,
   isOutgoingSelectable,
   isPrintSelectable,
+  NON_SALE_OUTGOING_REASONS,
+  OUTGOING_REASONS,
   printBatchMessage,
   toggleSelectAllVisible,
+  toggleUnifiedSelection,
   type CuttingBatchRow,
 } from "./cuttings-batch.ts";
 
@@ -162,6 +165,20 @@ test("print and commerce selections are fully independent", () => {
   const commerceSel2 = toggleSelectAllVisible(rows, new Set(), "commerce");
   assert.deepEqual([...commerceSel2].sort(), ["C1", "C2"]);
   assert.deepEqual([...printSel].sort(), ["C1", "C2"]);
+});
+
+test("unified selection toggles one cutting without affecting others", () => {
+  const first = toggleUnifiedSelection(new Set(["C-01"]), "C-02");
+  assert.deepEqual([...first].sort(), ["C-01", "C-02"]);
+  const second = toggleUnifiedSelection(first, "C-01");
+  assert.deepEqual([...second], ["C-02"]);
+});
+
+test("outgoing reasons include sales while the compatibility list remains non-sale only", () => {
+  assert.equal(OUTGOING_REASONS.includes("Sale"), true);
+  assert.equal(OUTGOING_REASONS.includes("Other"), true);
+  assert.equal(NON_SALE_OUTGOING_REASONS.includes("Sale" as never), false);
+  assert.equal(NON_SALE_OUTGOING_REASONS.includes("Gift"), true);
 });
 
 test("printBatchMessage: reports queued and skipped totals honestly", () => {
