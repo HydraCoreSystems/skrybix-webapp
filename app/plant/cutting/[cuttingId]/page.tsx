@@ -13,12 +13,17 @@ export const dynamic = "force-dynamic";
 // redirects here too, so an old label doesn't show any internal app UI.
 export default async function PublicCuttingPage({ params }: { params: { cuttingId: string } }) {
   const supabase = getSupabaseServerClient();
-  const { data: cuttingRaw } = await supabase
+  const { data: cuttingRaw, error: cuttingError } = await supabase
     .from("cuttings")
     .select("cutting_id")
     .eq("cutting_id", params.cuttingId)
     .maybeSingle();
 
+  // Same reasoning as the mother plant page: a DB error must surface
+  // visibly, not read as an identical-looking "unknown cutting" 404.
+  if (cuttingError) {
+    throw new Error(`Unable to look up this cutting: ${cuttingError.message}`);
+  }
   if (!cuttingRaw) notFound();
 
   await supabase.rpc("increment_cutting_scan_count", { p_cutting_id: params.cuttingId });

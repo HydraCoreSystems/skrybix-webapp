@@ -960,3 +960,92 @@ begin
   end if;
 end $$;
 
+-- ---------------------------------------------------------------
+-- Reliability Phase 1 (2026-08-22): atomic, idempotent outgoing push.
+--
+-- Previously, pushSoldToOutgoingLog() (app/cuttings/actions.ts) inserted
+-- into outgoing_log and archived the source cuttings as two SEPARATE,
+-- unchecked round trips from the application layer. If the archive
+-- update failed (or the process died between the two calls), a cutting
+-- ended up logged as gone in outgoing_log while still counting as active
+-- inventory -- a real partial-write risk given Skrybix's one authoritative
+-- job is physical inventory accuracy. This function makes both writes one
+-- Postgres statement (a CTE feeding the insert into the update), which is
+-- implicitly one transaction -- same "single function body = atomic"
+-- pattern as every other multi-step mutation in this schema
+-- (next_cutting_seq, select_cutting_for_commerce, etc.).
+--
+-- Idempotency: gating the target set on `archived_at is null` inside the
+-- SAME statement that both inserts and archives means a retried call
+-- (same ids resubmitted) finds nothing left to do on already-processed
+-- rows -- it can never create a duplicate outgoing_log row or re-archive
+-- an already-archived cutting. `for update` locks the candidate rows so
+-- two concurrent calls over overlapping id sets can't both claim the same
+-- cutting.
+--
+-- This also generalizes beyond "Sale": p_reason is a required, non-blank
+-- caller-supplied string, so the same atomic path serves both the
+-- existing sale push (app calls it with p_reason = 'Sale', preserving
+-- exact prior behavior) and new non-sale disposal reasons (gift, loss,
+-- disposal, trade, personal use) -- see logNonSaleOutgoing in
+-- app/cuttings/actions.ts. This does not add price/customer/channel
+-- fields or any sales-ledger concept -- it only lets Skrybix record why a
+-- cutting left physical inventory, which is squarely its own job, not
+-- GM Commerce's.
+-- ---------------------------------------------------------------
+
+create or replace function skrybix_push_cuttings_to_outgoing(
+  p_cutting_ids text[],
+  p_reason text,
+  p_selling_platform text default null,
+  p_notes text default null
+)
+returns integer
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_count integer;
+begin
+  if p_reason is null or btrim(p_reason) = '' then
+    raise exception 'A reason is required to log outgoing cuttings.';
+  end if;
+
+  with target as (
+    select cutting_id, full_display_name
+    from cuttings
+    where cutting_id = any(p_cutting_ids)
+      and archived_at is null
+    for update
+  ),
+  inserted as (
+    insert into outgoing_log (cutting_id, full_display_name, qty, reason, selling_platform, notes)
+    select cutting_id, full_display_name, 1, p_reason, p_selling_platform, p_notes
+    from target
+    returning cutting_id
+  )
+  update cuttings
+  set archived_at = now()
+  where cutting_id in (select cutting_id from inserted);
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+revoke all on function skrybix_push_cuttings_to_outgoing(text[], text, text, text) from public;
+
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'anon') then
+    revoke all on function skrybix_push_cuttings_to_outgoing(text[], text, text, text) from anon;
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'authenticated') then
+    revoke all on function skrybix_push_cuttings_to_outgoing(text[], text, text, text) from authenticated;
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant execute on function skrybix_push_cuttings_to_outgoing(text[], text, text, text) to service_role;
+  end if;
+end $$;
+

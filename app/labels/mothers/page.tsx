@@ -18,7 +18,13 @@ export default async function MotherLabelsPage({
 }) {
   const start = parseStartPosition(searchParams.start);
   const supabase = getSupabaseServerClient();
-  const { data: rowsRaw } = await supabase.from("mother_plants").select("*").eq("print_label", true);
+  const { data: rowsRaw, error: rowsError } = await supabase
+    .from("mother_plants")
+    .select("*")
+    .eq("print_label", true);
+  if (rowsError) {
+    throw new Error(`Unable to load queued mother labels: ${rowsError.message}`);
+  }
   const rows = (rowsRaw ?? []) as MotherPlant[];
 
   const items = await Promise.all(

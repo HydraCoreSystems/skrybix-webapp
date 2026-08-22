@@ -18,7 +18,10 @@ export default async function CuttingLabelsPage({
 }) {
   const start = parseStartPosition(searchParams.start);
   const supabase = getSupabaseServerClient();
-  const { data: rowsRaw } = await supabase.from("cuttings").select("*").eq("print_label", true);
+  const { data: rowsRaw, error: rowsError } = await supabase.from("cuttings").select("*").eq("print_label", true);
+  if (rowsError) {
+    throw new Error(`Unable to load queued cutting labels: ${rowsError.message}`);
+  }
   const rows = (rowsRaw ?? []) as Cutting[];
 
   // Every cutting label's QR encodes the same Instagram profile URL

@@ -1,0 +1,47 @@
+name: Application CI
+
+# Always-on CI for ordinary application changes. Before this workflow
+# existed, unit tests and the production build only ran inside
+# commerce-sku-db.yml, whose `on:` block is scoped to
+# `paths: supabase/**` (plus the workflow file itself) -- a PR touching
+# only app/, components/, or lib/ triggered no CI at all. This workflow
+# has no path filter: every push and pull request runs it, regardless of
+# which files changed.
+#
+# commerce-sku-db.yml keeps its own dedicated schema/migration
+# verification (supabase/verify_commerce_sku_migration.sh against a real
+# Postgres service container), scoped to supabase/** changes -- that
+# check is expensive and schema-specific, not something every ordinary
+# app PR needs to re-run. Its formerly-duplicated app-build-and-test job
+# was removed in favor of this workflow, which now covers that ground on
+# every push/PR unconditionally.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # npm test runs .ts files directly via node:test's native
+          # TypeScript support, which Node 20 does not have -- 22 is
+          # current Node LTS and what this was verified against (see the
+          # matching comment previously on commerce-sku-db.yml).
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build (includes full TypeScript type-check)
+        run: npm run build
+        # No Supabase env vars needed here -- every route in this app is
+        # server-rendered on demand, so nothing touches the database at
+        # build time.

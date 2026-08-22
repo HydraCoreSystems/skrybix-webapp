@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getSupabaseServerClient } from "@/lib/supabase";
+import { computeCommerceHandoffHealth, type CommerceHandoffRecord } from "@/lib/commerce-health";
 import type { OutgoingLogEntry } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -8,13 +9,15 @@ export default async function DashboardPage() {
   const supabase = getSupabaseServerClient();
 
   const [
-    { count: motherCount },
-    { count: cuttingCount },
-    { count: soldPending },
-    { count: outgoingCount },
-    { count: printMothers },
-    { count: printCuttings },
-    { data: recentOutgoingRaw },
+    motherCountRes,
+    cuttingCountRes,
+    soldPendingRes,
+    outgoingCountRes,
+    printMothersRes,
+    printCuttingsRes,
+    recentOutgoingRes,
+    commerceCuttingsRes,
+    commerceMothersRes,
   ] = await Promise.all([
     supabase.from("mother_plants").select("*", { count: "exact", head: true }),
     supabase.from("cuttings").select("*", { count: "exact", head: true }).is("archived_at", null),
@@ -23,9 +26,57 @@ export default async function DashboardPage() {
     supabase.from("mother_plants").select("*", { count: "exact", head: true }).eq("print_label", true),
     supabase.from("cuttings").select("*", { count: "exact", head: true }).eq("print_label", true),
     supabase.from("outgoing_log").select("*").order("id", { ascending: false }).limit(8),
+    // GM Commerce handoff health (owner-visible only -- see
+    // lib/commerce-health.ts). Reads the same two timestamp columns the
+    // existing narrow export API already reads; no new external surface.
+    supabase.from("cuttings").select("cutting_id, commerce_selected_at, commerce_acknowledged_at").not("commerce_selected_at", "is", null),
+    supabase.from("mother_plants").select("mother_id, commerce_selected_at, commerce_acknowledged_at").not("commerce_selected_at", "is", null),
   ]);
 
-  const recentOutgoing = (recentOutgoingRaw ?? []) as OutgoingLogEntry[];
+  // Every dashboard number must be either real or a visible failure -- never
+  // a believable-looking 0/empty state that silently hides a DB outage. A
+  // null count from a failed query previously rendered as "0", which is
+  // indistinguishable from genuinely having zero records.
+  const failures = [
+    ["mother plant count", motherCountRes.error],
+    ["active cutting count", cuttingCountRes.error],
+    ["sold-pending count", soldPendingRes.error],
+    ["outgoing log count", outgoingCountRes.error],
+    ["queued mother labels count", printMothersRes.error],
+    ["queued cutting labels count", printCuttingsRes.error],
+    ["recent outgoing activity", recentOutgoingRes.error],
+    ["GM Commerce handoff (cuttings)", commerceCuttingsRes.error],
+    ["GM Commerce handoff (mothers)", commerceMothersRes.error],
+  ].filter(([, error]) => error);
+
+  if (failures.length > 0) {
+    const detail = failures.map(([label, error]) => `${label} (${(error as { message: string }).message})`).join("; ");
+    throw new Error(`Dashboard could not load from the database: ${detail}`);
+  }
+
+  const { count: motherCount } = motherCountRes;
+  const { count: cuttingCount } = cuttingCountRes;
+  const { count: soldPending } = soldPendingRes;
+  const { count: outgoingCount } = outgoingCountRes;
+  const { count: printMothers } = printMothersRes;
+  const { count: printCuttings } = printCuttingsRes;
+  const recentOutgoing = (recentOutgoingRes.data ?? []) as OutgoingLogEntry[];
+
+  const commerceRecords: CommerceHandoffRecord[] = [
+    ...(commerceCuttingsRes.data ?? []).map((r) => ({
+      sourceRecordId: r.cutting_id as string,
+      plantRecordType: "cutting" as const,
+      commerceSelectedAt: r.commerce_selected_at as string | null,
+      commerceAcknowledgedAt: r.commerce_acknowledged_at as string | null,
+    })),
+    ...(commerceMothersRes.data ?? []).map((r) => ({
+      sourceRecordId: r.mother_id as string,
+      plantRecordType: "mother" as const,
+      commerceSelectedAt: r.commerce_selected_at as string | null,
+      commerceAcknowledgedAt: r.commerce_acknowledged_at as string | null,
+    })),
+  ];
+  const commerceHealth = computeCommerceHandoffHealth(commerceRecords);
 
   return (
     <>
@@ -84,6 +135,52 @@ export default async function DashboardPage() {
         ) : (
           <p>No outgoing activity yet.</p>
         )}
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>GM Commerce handoff health</h3>
+        <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 0 }}>
+          Owner-visible only -- reads the same selection/acknowledgement timestamps the existing narrow
+          authenticated export API already uses. No new access is granted to GM Commerce by this view.
+        </p>
+        <div className="stat-grid">
+          <div className="stat">
+            <div className="num">{commerceHealth.waitingCount}</div>
+            <div className="label">Selected, waiting on GM Commerce</div>
+          </div>
+          <div className="stat">
+            <div className="num">{commerceHealth.waitingLongCount}</div>
+            <div className="label">Waiting unusually long (48h+)</div>
+          </div>
+          <div className="stat">
+            <div className="num">{commerceHealth.acknowledgedCount}</div>
+            <div className="label">Acknowledged / received (all time)</div>
+          </div>
+        </div>
+        {commerceHealth.waitingLongRecords.length > 0 && (
+          <table style={{ marginTop: 12 }}>
+            <thead>
+              <tr>
+                <th>Record</th>
+                <th>Type</th>
+                <th>Selected</th>
+              </tr>
+            </thead>
+            <tbody>
+              {commerceHealth.waitingLongRecords.map((r) => (
+                <tr key={`${r.plantRecordType}-${r.sourceRecordId}`}>
+                  <td>{r.sourceRecordId}</td>
+                  <td>{r.plantRecordType}</td>
+                  <td>{new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(r.commerceSelectedAt as string))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p style={{ color: "var(--muted)", fontSize: 12, marginBottom: 0 }}>
+          Actionable failure / reconciliation attention: not tracked yet -- this schema has no failure-event log
+          to source that from honestly. Flagged as a beta follow-up rather than a fabricated status.
+        </p>
       </div>
 
       <div className="card">

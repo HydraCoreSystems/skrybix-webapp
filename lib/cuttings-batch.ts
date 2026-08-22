@@ -10,7 +10,14 @@
 // Commerce and vice versa). The only shared concept is which rows are
 // currently visible after search/filter — see toggleSelectAllVisible.
 
-export type CuttingPrintState = "selectable" | "queued" | "printed";
+// Non-sale outgoing reasons -- shared between app/cuttings/actions.ts
+// (server-side validation) and CuttingsBatchTable.tsx (the reason
+// dropdown). Lives here, not in actions.ts, because a "use server" file
+// may only export async functions, not consts/types.
+export const NON_SALE_OUTGOING_REASONS = ["Gift", "Loss", "Disposal", "Trade", "Personal Use", "Other"] as const;
+export type NonSaleOutgoingReason = (typeof NON_SALE_OUTGOING_REASONS)[number];
+
+export type CuttingPrintState = "selectable" | "reprintable" | "queued";
 
 export type CuttingCommerceState = "selectable" | "selected" | "acknowledged";
 
@@ -25,12 +32,21 @@ export interface CuttingBatchRow {
 
 // ---- Per-row status -------------------------------------------------------
 
-/** Print status: only never-queued-and-never-printed rows get an active
- *  checkbox; already-queued (Queued) and previously-printed (Printed) rows
- *  must show an honest status instead of a selectable control. */
+// Production bug fix (2026-08-22): a previously-printed cutting used to be
+// PERMANENTLY excluded from the print queue -- once label_print_count > 0,
+// isPrintSelectable returned false forever, with no path back to
+// selectable. Real labels sometimes need a legitimate reprint (alignment,
+// printer, or physical label damage), so print history must never be a
+// one-way gate. The only state that makes a row ineligible is being
+// CURRENTLY queued (print_label = true) -- prior print history changes the
+// button's label ("Reprint" instead of "Queue"), never its eligibility.
+/** Print status: any row not currently queued is selectable -- "selectable"
+ *  (never printed before) and "reprintable" (printed before, eligible for
+ *  a reprint) both get an active checkbox; only "queued" (already
+ *  print_label = true) shows an honest non-interactive status instead. */
 export function cuttingPrintState(c: Pick<CuttingBatchRow, "print_label" | "label_print_count">): CuttingPrintState {
   if (c.print_label) return "queued";
-  if (c.label_print_count > 0) return "printed";
+  if (c.label_print_count > 0) return "reprintable";
   return "selectable";
 }
 
@@ -43,13 +59,25 @@ export function cuttingCommerceState(
 }
 
 export function isPrintSelectable(c: Pick<CuttingBatchRow, "print_label" | "label_print_count">): boolean {
-  return cuttingPrintState(c) === "selectable";
+  const state = cuttingPrintState(c);
+  return state === "selectable" || state === "reprintable";
 }
 
 export function isCommerceSelectable(
   c: Pick<CuttingBatchRow, "commerce_selected_at" | "commerce_acknowledged_at">
 ): boolean {
   return cuttingCommerceState(c) === "selectable";
+}
+
+// Non-sale outgoing logging has no persisted "queued"/"selected" state of
+// its own (unlike print/commerce) -- it's an immediate action, not a
+// queue. Every row the Cuttings page renders is already filtered to
+// archived_at is null (see app/cuttings/page.tsx), so any visible row is
+// eligible to be logged as outgoing. This predicate exists mainly so
+// "select all visible" can share the same toggleSelectAllVisible logic
+// as the print/commerce modes below.
+export function isOutgoingSelectable(_c: CuttingBatchRow): boolean {
+  return true;
 }
 
 // ---- "Select all visible" -------------------------------------------------
@@ -63,13 +91,11 @@ export function isCommerceSelectable(
 export function toggleSelectAllVisible(
   visibleRows: readonly CuttingBatchRow[],
   currentSelection: ReadonlySet<string>,
-  mode: "print" | "commerce"
+  mode: "print" | "commerce" | "outgoing"
 ): Set<string> {
-  const selectableVisible = new Set(
-    visibleRows
-      .filter((r) => (mode === "print" ? isPrintSelectable(r) : isCommerceSelectable(r)))
-      .map((r) => r.cutting_id)
-  );
+  const predicate =
+    mode === "print" ? isPrintSelectable : mode === "commerce" ? isCommerceSelectable : isOutgoingSelectable;
+  const selectableVisible = new Set(visibleRows.filter(predicate).map((r) => r.cutting_id));
 
   const next = new Set(currentSelection);
   // Are all selectable-visible rows already selected? If so, this is a "deselect

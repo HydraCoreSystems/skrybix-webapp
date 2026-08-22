@@ -8,7 +8,9 @@ import {
   computePrintQueueBatch,
   commerceBatchMessage,
   printBatchMessage,
+  NON_SALE_OUTGOING_REASONS,
   type CuttingBatchRow,
+  type NonSaleOutgoingReason,
 } from "@/lib/cuttings-batch";
 import { getSupabaseServerClient } from "@/lib/supabase";
 
@@ -77,10 +79,17 @@ export async function createCuttings(formData: FormData) {
 
 export async function toggleCuttingField(cuttingId: string, field: "sold" | "print_label", value: boolean) {
   const supabase = getSupabaseServerClient();
-  await supabase
+  const { error } = await supabase
     .from("cuttings")
     .update({ [field]: value })
     .eq("cutting_id", cuttingId);
+  // A swallowed error here previously meant a "Mark sold" / "Queue for
+  // print" click could silently no-op -- the button would look clicked but
+  // the database would be unchanged. Throw so the caller (a <form action>
+  // submit or CuttingsBatchTable's client-side call) sees a real failure.
+  if (error) {
+    throw new Error(`Could not update ${cuttingId}: ${error.message}`);
+  }
   revalidatePath("/cuttings");
   if (field === "print_label") {
     revalidatePath("/labels/cuttings");
@@ -195,12 +204,21 @@ export async function sendCuttingsToCommerce(cuttingIds: string[]): Promise<Batc
   return { ok: true, message: commerceBatchMessage(plan) };
 }
 
+// Reliability Phase 1: this used to be two separate, unchecked round trips
+// (insert into outgoing_log, then a separate archive update with no error
+// check at all) -- if the archive update failed or the process died in
+// between, a cutting ended up logged as gone while still counting as
+// active inventory. Both writes now happen inside one atomic Postgres
+// function (skrybix_push_cuttings_to_outgoing, supabase/schema.sql) so a
+// cutting can never be added to the outgoing log without being archived,
+// or archived without its outgoing record. Same "Sale" reason and qty as
+// before -- the button and its behavior on /cuttings are unchanged.
 export async function pushSoldToOutgoingLog() {
   const supabase = getSupabaseServerClient();
 
   const { data: soldRows, error } = await supabase
     .from("cuttings")
-    .select("cutting_id, full_display_name")
+    .select("cutting_id")
     .eq("sold", true)
     .is("archived_at", null);
 
@@ -213,47 +231,76 @@ export async function pushSoldToOutgoingLog() {
     redirect("/cuttings?error=" + encodeURIComponent("No sold cuttings to push."));
   }
 
-  const { data: existing } = await supabase
-    .from("outgoing_log")
-    .select("cutting_id")
-    .in(
-      "cutting_id",
-      rows.map((r) => r.cutting_id)
-    );
+  const { data: pushedCount, error: pushErr } = await supabase.rpc("skrybix_push_cuttings_to_outgoing", {
+    p_cutting_ids: rows.map((r) => r.cutting_id),
+    p_reason: "Sale",
+  });
 
-  const existingIds = new Set((existing ?? []).map((r) => r.cutting_id));
-  const toInsert = rows
-    .filter((r) => !existingIds.has(r.cutting_id))
-    .map((r) => ({
-      cutting_id: r.cutting_id,
-      full_display_name: r.full_display_name,
-      qty: 1,
-      reason: "Sale",
-    }));
-
-  if (toInsert.length) {
-    const { error: insertErr } = await supabase.from("outgoing_log").insert(toInsert);
-    if (insertErr) {
-      redirect("/cuttings?error=" + encodeURIComponent(insertErr.message));
-    }
+  if (pushErr) {
+    redirect("/cuttings?error=" + encodeURIComponent(`Could not push sold cuttings: ${pushErr.message}`));
   }
-
-  // Archive every pushed row (soft-archive column, see supabase/schema.sql)
-  // so active inventory stops counting it — the exact fix
-  // Skrybix_FIXED_v2.gs applied on the Sheets side via Archive_Cuttings.
-  await supabase
-    .from("cuttings")
-    .update({ archived_at: new Date().toISOString() })
-    .in(
-      "cutting_id",
-      rows.map((r) => r.cutting_id)
-    );
 
   revalidatePath("/cuttings");
   revalidatePath("/outgoing");
   revalidatePath("/");
   redirect(
     "/cuttings?success=" +
-      encodeURIComponent(`Pushed ${toInsert.length} sold cutting(s) to Outgoing Log, archived ${rows.length}.`)
+      encodeURIComponent(`Pushed ${pushedCount ?? 0} sold cutting(s) to Outgoing Log and archived them.`)
   );
+}
+
+// Non-sale outgoing reasons -- Skrybix's own authoritative-inventory job
+// (see CLAUDE.md / docs/CURRENT_ARCHITECTURE.md) requires a way to record
+// a cutting leaving inventory for a reason other than a GM Commerce sale.
+// Before this, the ONLY code path that ever inserted into outgoing_log was
+// pushSoldToOutgoingLog, which required sold = true and hardcoded
+// reason = "Sale" -- there was no way, short of a hand-written SQL
+// statement, to log a cutting given away, lost, disposed of, traded, or
+// kept personally. This is deliberately NOT a sales ledger: no price,
+// customer, or channel field is added -- only the same reason/notes
+// columns outgoing_log already had. NON_SALE_OUTGOING_REASONS/
+// NonSaleOutgoingReason live in lib/cuttings-batch.ts, not here -- a
+// "use server" file may only export async functions, not consts/types.
+export async function logNonSaleOutgoing(
+  cuttingIds: string[],
+  reason: NonSaleOutgoingReason,
+  notes?: string
+): Promise<BatchActionResult> {
+  const ids = dedupeIds(cuttingIds);
+  if (ids.length === 0) {
+    return { ok: false, message: "Nothing selected to log." };
+  }
+  if (!NON_SALE_OUTGOING_REASONS.includes(reason)) {
+    return { ok: false, message: "Choose a valid reason." };
+  }
+  const trimmedNotes = notes?.trim() || null;
+  if (reason === "Other" && !trimmedNotes) {
+    return { ok: false, message: 'Describe the reason when "Other" is selected.' };
+  }
+
+  const supabase = getSupabaseServerClient();
+  const { data: loggedCount, error } = await supabase.rpc("skrybix_push_cuttings_to_outgoing", {
+    p_cutting_ids: ids,
+    p_reason: reason,
+    p_notes: trimmedNotes,
+  });
+
+  if (error) {
+    return { ok: false, message: `Could not log outgoing cuttings: ${error.message}` };
+  }
+
+  const count = (loggedCount as number) ?? 0;
+  const skipped = ids.length - count;
+
+  revalidatePath("/cuttings");
+  revalidatePath("/outgoing");
+  revalidatePath("/");
+  return {
+    ok: true,
+    message:
+      count === 0
+        ? "Nothing new logged (already archived or unavailable)."
+        : `${count} cutting${count === 1 ? "" : "s"} logged as ${reason} and archived.` +
+          (skipped > 0 ? ` ${skipped} skipped (already archived or unavailable).` : ""),
+  };
 }

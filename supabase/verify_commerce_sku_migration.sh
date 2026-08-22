@@ -39,6 +39,13 @@
 #      (old+new signatures, old revoked, new service_role-only) states via
 #      its phase_detection row, and fails closed (unexpected_signature_state)
 #      on a state matching neither shape -- without ever calling an RPC.
+#  12. (Reliability Phase 1) skrybix_push_cuttings_to_outgoing() -- the
+#      atomic, idempotent outgoing-log push introduced in
+#      supabase/migrations/20260822180000_atomic_outgoing_push.sql --
+#      archives a cutting and logs it in one statement, is a safe no-op
+#      on retry, supports non-sale reasons, skips already-archived/
+#      unknown ids without erroring, and fails closed on a blank reason.
+#      See supabase/outgoing_push_tests.sql.
 #
 # Expects PGHOST/PGPORT/PGUSER/PGPASSWORD to already be set in the
 # environment (standard libpq vars) pointing at a throwaway Postgres
@@ -53,9 +60,11 @@ SCHEMA_SQL="$REPO_ROOT/supabase/schema.sql"
 MIGRATION_1_SQL="$REPO_ROOT/supabase/migrations/20260813221000_commerce_sku_standardization.sql"
 MIGRATION_2_SQL="$REPO_ROOT/supabase/migrations/20260815120000_existing_id_as_commerce_sku.sql"
 MIGRATION_3_SQL="$REPO_ROOT/supabase/migrations/20260821221113_durable_label_print_history.sql"
+MIGRATION_4_SQL="$REPO_ROOT/supabase/migrations/20260822180000_atomic_outgoing_push.sql"
 LEGACY_TESTS_SQL="$REPO_ROOT/supabase/commerce_sku_tests.sql"
 CORRECTION_TESTS_SQL="$REPO_ROOT/supabase/existing_id_commerce_tests.sql"
 PREFLIGHT_SQL="$REPO_ROOT/supabase/existing_id_correction_preflight.sql"
+OUTGOING_PUSH_TESTS_SQL="$REPO_ROOT/supabase/outgoing_push_tests.sql"
 # Checked-in, immutable snapshot of supabase/schema.sql as of commit
 # a4f69f1c94d807c5df8c50926d00eccf5e14e8eb (PR #11's merge -- the last
 # commit before 20260815120000_existing_id_as_commerce_sku.sql existed).
@@ -78,6 +87,7 @@ LEGACY_FUNCTIONAL_DB="skrybix_ci_legacy_functional"
 CORRECTION_FUNCTIONAL_DB="skrybix_ci_correction_functional"
 PREFLIGHT_PRE_DB="skrybix_ci_preflight_pre"
 PREFLIGHT_UNEXPECTED_DB="skrybix_ci_preflight_unexpected"
+OUTGOING_PUSH_DB="skrybix_ci_outgoing_push"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -147,6 +157,9 @@ pass "existing-ID-as-SKU correction migration applied cleanly on top of it"
 psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_3_SQL"
 pass "durable label-print history migration applied cleanly on top of it"
 
+psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_4_SQL"
+pass "atomic outgoing push migration applied cleanly on top of it"
+
 echo "=== [3/10] Schema object parity between fresh and upgrade paths ==="
 FRESH_DUMP="$(mktemp)"
 UPGRADE_DUMP="$(mktemp)"
@@ -158,8 +171,8 @@ if ! diff -q "$FRESH_DUMP" "$UPGRADE_DUMP" > /dev/null; then
 fi
 pass "fresh apply and migration-upgraded schema are structurally identical"
 
-FRESH_GRANTS=$(psql -d "$FRESH_DB" -tAc "select proname || '|' || pg_get_function_identity_arguments(oid) || '|' || coalesce((select array_agg(grantee::regrole::text order by grantee::regrole::text) from aclexplode(proacl) where privilege_type='EXECUTE'), '{}') from pg_proc where proname in ('select_mother_for_commerce','select_cutting_for_commerce','skrybix_mark_mother_labels_printed','skrybix_mark_cutting_labels_printed') order by 1;")
-UPGRADE_GRANTS=$(psql -d "$UPGRADE_DB" -tAc "select proname || '|' || pg_get_function_identity_arguments(oid) || '|' || coalesce((select array_agg(grantee::regrole::text order by grantee::regrole::text) from aclexplode(proacl) where privilege_type='EXECUTE'), '{}') from pg_proc where proname in ('select_mother_for_commerce','select_cutting_for_commerce','skrybix_mark_mother_labels_printed','skrybix_mark_cutting_labels_printed') order by 1;")
+FRESH_GRANTS=$(psql -d "$FRESH_DB" -tAc "select proname || '|' || pg_get_function_identity_arguments(oid) || '|' || coalesce((select array_agg(grantee::regrole::text order by grantee::regrole::text) from aclexplode(proacl) where privilege_type='EXECUTE'), '{}') from pg_proc where proname in ('select_mother_for_commerce','select_cutting_for_commerce','skrybix_mark_mother_labels_printed','skrybix_mark_cutting_labels_printed','skrybix_push_cuttings_to_outgoing') order by 1;")
+UPGRADE_GRANTS=$(psql -d "$UPGRADE_DB" -tAc "select proname || '|' || pg_get_function_identity_arguments(oid) || '|' || coalesce((select array_agg(grantee::regrole::text order by grantee::regrole::text) from aclexplode(proacl) where privilege_type='EXECUTE'), '{}') from pg_proc where proname in ('select_mother_for_commerce','select_cutting_for_commerce','skrybix_mark_mother_labels_printed','skrybix_mark_cutting_labels_printed','skrybix_push_cuttings_to_outgoing') order by 1;")
 [ "$FRESH_GRANTS" = "$UPGRADE_GRANTS" ] || fail "EXECUTE grants on application RPCs differ between fresh and upgrade paths"
 pass "EXECUTE grants on commerce and durable label-print RPCs are identical between fresh and upgrade paths"
 
@@ -167,6 +180,7 @@ echo "=== [4/10] Migration re-apply is a safe no-op (all migrations) ==="
 psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_1_SQL"
 psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_2_SQL"
 psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_3_SQL"
+psql_admin -d "$UPGRADE_DB" -f "$MIGRATION_4_SQL"
 pass "re-applying all migrations a second time produced no errors"
 
 echo "=== [5/10] Access hardening: anon/authenticated blocked, service_role works (original + corrected objects) ==="
@@ -193,6 +207,10 @@ DENIED_LABEL_PRINT=$(psql -d "$FRESH_DB" -tAc "set role anon; select skrybix_mar
 echo "$DENIED_LABEL_PRINT" | grep -qi "permission denied" || fail "anon role was NOT denied EXECUTE on skrybix_mark_cutting_labels_printed"
 pass "anon role denied EXECUTE on durable label-print RPCs"
 
+DENIED_OUTGOING_PUSH=$(psql -d "$FRESH_DB" -tAc "set role anon; select skrybix_push_cuttings_to_outgoing(array['x'], 'Sale');" 2>&1 || true)
+echo "$DENIED_OUTGOING_PUSH" | grep -qi "permission denied" || fail "anon role was NOT denied EXECUTE on skrybix_push_cuttings_to_outgoing"
+pass "anon role denied EXECUTE on the atomic outgoing push RPC"
+
 psql_admin -d "$FRESH_DB" -c "
   insert into mother_plants (mother_id, display_name, genus, species, print_label)
   values ('HY-PRINT01','Hoya print history test','Hoya','testus', true);
@@ -211,6 +229,29 @@ REPLAY_COUNT=$(psql -d "$FRESH_DB" -tAc "set role service_role; select skrybix_m
 REPLAY_STATE=$(psql -d "$FRESH_DB" -tAc "select label_print_count = 1 from cuttings where cutting_id = 'HY-PRINT01-C01';")
 [ "$REPLAY_STATE" = "t" ] || fail "replaying a completed print incorrectly incremented print history"
 pass "durable label-print RPC atomically records one print, clears its queue entry, and is replay-safe"
+
+# Reprint cycle (production bug fix, 2026-08-22): a previously-printed
+# cutting must remain eligible to be queued and printed again -- see
+# isPrintSelectable/cuttingPrintState in lib/cuttings-batch.ts. Simulate
+# Phil re-queuing HY-PRINT01-C01 (already at label_print_count = 1 from
+# above) and confirming a second print: label_print_count must go from
+# 1x to 2x, label_last_printed_at must advance to the new confirmation
+# time (not stay frozen at the first print), and the replay/idempotency
+# guarantee must hold at this new count too, not just at count 0->1.
+FIRST_PRINTED_AT=$(psql -d "$FRESH_DB" -tAc "select label_last_printed_at from cuttings where cutting_id = 'HY-PRINT01-C01';")
+psql_admin -d "$FRESH_DB" -c "update cuttings set print_label = true where cutting_id = 'HY-PRINT01-C01';"
+REPRINT_COUNT=$(psql -d "$FRESH_DB" -tAc "set role service_role; select skrybix_mark_cutting_labels_printed(array['HY-PRINT01-C01']);" | tail -1)
+[ "$REPRINT_COUNT" = "1" ] || fail "reprint confirmation should update exactly one re-queued cutting, got '$REPRINT_COUNT'"
+REPRINT_STATE=$(psql -d "$FRESH_DB" -tAc "
+  select (not print_label) and label_print_count = 2 and label_last_printed_at > '$FIRST_PRINTED_AT'::timestamptz
+  from cuttings where cutting_id = 'HY-PRINT01-C01';
+")
+[ "$REPRINT_STATE" = "t" ] || fail "reprint confirmation did not increment label_print_count from 1x to 2x and advance label_last_printed_at"
+REPRINT_REPLAY_COUNT=$(psql -d "$FRESH_DB" -tAc "set role service_role; select skrybix_mark_cutting_labels_printed(array['HY-PRINT01-C01']);" | tail -1)
+[ "$REPRINT_REPLAY_COUNT" = "0" ] || fail "replaying a completed reprint should update zero rows, got '$REPRINT_REPLAY_COUNT'"
+REPRINT_REPLAY_STATE=$(psql -d "$FRESH_DB" -tAc "select label_print_count = 2 from cuttings where cutting_id = 'HY-PRINT01-C01';")
+[ "$REPRINT_REPLAY_STATE" = "t" ] || fail "replaying a completed reprint incorrectly changed print history"
+pass "reprint confirmation increments label_print_count from 1x to 2x, advances label_last_printed_at, and is replay-safe at that count too"
 
 echo "=== [6/10] Legacy functional/negative-path suite (dormant genus/plant-code path, run as table owner) ==="
 psql_admin -d postgres -c "drop database if exists $LEGACY_FUNCTIONAL_DB;"
@@ -344,6 +385,32 @@ if echo "$PREFLIGHT_STRIPPED" | grep -qiE '\b(insert|update|delete|merge|create|
 fi
 pass "existing_id_correction_preflight.sql contains no DML/DDL/RPC/transaction-control keywords"
 
+echo "=== [12/12] Atomic outgoing push: skrybix_push_cuttings_to_outgoing() ==="
+psql_admin -d postgres -c "drop database if exists $OUTGOING_PUSH_DB;"
+psql_admin -d postgres -c "create database $OUTGOING_PUSH_DB owner $PGUSER;"
+setup_supabase_roles "$OUTGOING_PUSH_DB"
+psql_admin -d "$OUTGOING_PUSH_DB" -f "$SCHEMA_SQL"
+OUTGOING_OUTPUT="$(psql -d "$OUTGOING_PUSH_DB" -f "$OUTGOING_PUSH_TESTS_SQL" 2>&1)"
+echo "$OUTGOING_OUTPUT" | grep -q "A reason is required to log outgoing cuttings" \
+  || fail "outgoing_push_tests.sql did not exercise the fail-closed blank-reason path"
+ARCHIVED_COUNT=$(psql -d "$OUTGOING_PUSH_DB" -tAc "select count(*) from cuttings where cutting_id in ('HY-OUT01-C01','HY-OUT01-C02','HY-OUT01-C03') and archived_at is not null;")
+[ "$ARCHIVED_COUNT" -eq 3 ] || fail "expected exactly 3 archived test cuttings after outgoing_push_tests.sql (Sale + Gift + Loss), got $ARCHIVED_COUNT"
+UNARCHIVED_OUTGOING=$(psql -d "$OUTGOING_PUSH_DB" -tAc "
+  select count(*) from outgoing_log ol
+  join cuttings c on c.cutting_id = ol.cutting_id
+  where ol.cutting_id in ('HY-OUT01-C01','HY-OUT01-C02','HY-OUT01-C03') and c.archived_at is null;
+")
+[ "$UNARCHIVED_OUTGOING" -eq 0 ] || fail "found $UNARCHIVED_OUTGOING outgoing_log row(s) whose cutting was never archived -- the exact partial-write defect this function exists to prevent"
+DUPLICATE_OUTGOING=$(psql -d "$OUTGOING_PUSH_DB" -tAc "
+  select count(*) from (
+    select cutting_id, count(*) c from outgoing_log
+    where cutting_id in ('HY-OUT01-C01','HY-OUT01-C02','HY-OUT01-C03')
+    group by cutting_id having count(*) > 1
+  ) dup;
+")
+[ "$DUPLICATE_OUTGOING" -eq 0 ] || fail "found duplicate outgoing_log rows for a test cutting -- idempotent retry did not converge"
+pass "skrybix_push_cuttings_to_outgoing atomically archives+logs, is idempotent on retry, supports non-sale reasons, skips already-archived/unknown ids, and fails closed on a blank reason"
+
 echo
 echo "=== ALL CHECKS PASSED ==="
 
@@ -354,3 +421,4 @@ psql_admin -d postgres -c "drop database if exists $LEGACY_FUNCTIONAL_DB;"
 psql_admin -d postgres -c "drop database if exists $CORRECTION_FUNCTIONAL_DB;"
 psql_admin -d postgres -c "drop database if exists $PREFLIGHT_PRE_DB;"
 psql_admin -d postgres -c "drop database if exists $PREFLIGHT_UNEXPECTED_DB;"
+psql_admin -d postgres -c "drop database if exists $OUTGOING_PUSH_DB;"
