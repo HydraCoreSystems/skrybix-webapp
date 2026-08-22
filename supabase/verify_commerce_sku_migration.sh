@@ -199,11 +199,14 @@ psql_admin -d "$FRESH_DB" -c "
   insert into cuttings (cutting_id, mother_id, full_display_name, print_label)
   values ('HY-PRINT01-C01','HY-PRINT01','Hoya print history test', true);
 "
-PRINTED_COUNT=$(psql -d "$FRESH_DB" -tAc "set role service_role; select skrybix_mark_cutting_labels_printed(array['HY-PRINT01-C01']);")
+# `set role service_role;` emits a "SET" command tag that psql -t does not
+# suppress; take the last line so we compare the RPC's integer result, exactly
+# as the concurrency checks below do (tail -1).
+PRINTED_COUNT=$(psql -d "$FRESH_DB" -tAc "set role service_role; select skrybix_mark_cutting_labels_printed(array['HY-PRINT01-C01']);" | tail -1)
 [ "$PRINTED_COUNT" = "1" ] || fail "label-print RPC should update exactly one queued cutting, got '$PRINTED_COUNT'"
 PRINTED_STATE=$(psql -d "$FRESH_DB" -tAc "select (not print_label) and label_print_count = 1 and label_last_printed_at is not null from cuttings where cutting_id = 'HY-PRINT01-C01';")
 [ "$PRINTED_STATE" = "t" ] || fail "label-print RPC did not atomically clear queue and preserve print history"
-REPLAY_COUNT=$(psql -d "$FRESH_DB" -tAc "set role service_role; select skrybix_mark_cutting_labels_printed(array['HY-PRINT01-C01']);")
+REPLAY_COUNT=$(psql -d "$FRESH_DB" -tAc "set role service_role; select skrybix_mark_cutting_labels_printed(array['HY-PRINT01-C01']);" | tail -1)
 [ "$REPLAY_COUNT" = "0" ] || fail "replaying a completed print should update zero rows, got '$REPLAY_COUNT'"
 REPLAY_STATE=$(psql -d "$FRESH_DB" -tAc "select label_print_count = 1 from cuttings where cutting_id = 'HY-PRINT01-C01';")
 [ "$REPLAY_STATE" = "t" ] || fail "replaying a completed print incorrectly incremented print history"
