@@ -8,6 +8,7 @@ const LINKS = [
   { href: "/", label: "Dashboard" },
   { href: "/mothers", label: "Mother Plants" },
   { href: "/cuttings", label: "Cuttings" },
+  { href: "/hoya-library", label: "Hoya Library" },
   { href: "/outgoing", label: "Outgoing Log" },
   { href: "/settings/password", label: "Settings" },
 ];
