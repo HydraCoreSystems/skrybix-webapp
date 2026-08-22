@@ -644,9 +644,8 @@ form.inline {
   display: inline;
 }
 
-/* Cuttings batch actions — two visually distinct batch buttons above the
-   table, plus compact checkbox labels and header "select all visible"
-   controls. The Print and GM Commerce selections are independent. */
+/* Cuttings batch actions — a shared row selection with contextual actions,
+   plus compact checkbox labels and header "select all visible" controls. */
 .batch-actions {
   display: flex;
   align-items: center;
@@ -757,6 +756,290 @@ label {
 .stat .label {
   font-size: 12px;
   color: var(--muted);
+}
+
+.stat-link {
+  color: inherit;
+  text-decoration: none;
+  transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.stat-link:hover {
+  transform: translateY(-2px);
+  border-color: var(--green-mid);
+  box-shadow: var(--shadow-md);
+}
+
+.worklist-filters {
+  display: grid;
+  grid-template-columns: minmax(250px, 1fr) minmax(210px, 280px) auto auto;
+  gap: 10px;
+  align-items: end;
+  margin: 8px 0 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--card) 85%, var(--green-light));
+}
+
+.worklist-filters label,
+.outgoing-fields label {
+  margin: 0;
+}
+
+.worklist-filters label > span,
+.outgoing-fields label > span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.worklist-filters input,
+.worklist-filters select,
+.outgoing-fields input,
+.outgoing-fields select {
+  width: 100%;
+  min-height: 40px;
+  color: var(--text);
+}
+
+.worklist-result-count {
+  margin: 12px 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.batch-review-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 6px 0 14px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--green) 55%, var(--border));
+  border-radius: var(--radius);
+  background: var(--green-light);
+}
+
+.batch-review-banner strong,
+.batch-review-banner span {
+  display: block;
+}
+
+.batch-review-banner span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.creation-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 520px;
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--green-light);
+}
+
+.creation-option input {
+  margin-top: 3px;
+}
+
+.creation-option strong,
+.creation-option small {
+  display: block;
+}
+
+.creation-option small {
+  margin-top: 3px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.selection-action-bar {
+  position: sticky;
+  top: 68px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(14px);
+}
+
+.selection-action-bar.active {
+  border-color: var(--green-mid);
+  box-shadow: var(--shadow-md);
+}
+
+.selection-action-bar strong,
+.selection-action-bar span {
+  display: block;
+}
+
+.selection-action-bar span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.btn.warm {
+  border-color: #b9733d;
+  background: linear-gradient(135deg, #c9854d, #9e542d);
+  color: #fff;
+}
+
+.btn.secondary.warm {
+  border-color: color-mix(in srgb, #c9854d 70%, var(--border));
+  background: color-mix(in srgb, #c9854d 10%, var(--card));
+  color: color-mix(in srgb, #c9854d 80%, var(--text));
+}
+
+.outgoing-confirmation {
+  margin: 0 0 16px;
+  padding: 18px;
+  border: 1px solid #b9733d;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, #c9854d 8%, var(--card));
+  box-shadow: var(--shadow-md);
+}
+
+.outgoing-confirmation-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.outgoing-confirmation .eyebrow {
+  color: #c9854d;
+}
+
+.outgoing-confirmation h3 {
+  margin: 2px 0 0;
+}
+
+.selected-id-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 118px;
+  margin: 12px 0 16px;
+  overflow-y: auto;
+}
+
+.selected-id-list code {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text);
+}
+
+.outgoing-fields {
+  display: grid;
+  grid-template-columns: minmax(170px, 240px) 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.worklist-table-wrap {
+  overflow-x: auto;
+}
+
+.worklist-table tr.selected {
+  background: var(--green-light);
+}
+
+.worklist-table td > small,
+.worklist-table td > span + small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.status-pill {
+  display: inline-flex;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.status-pill.queued,
+.status-pill.commerce-selected {
+  border-color: #c79a50;
+  background: color-mix(in srgb, #c79a50 12%, var(--card));
+  color: color-mix(in srgb, #c79a50 75%, var(--text));
+}
+
+.status-pill.reprintable,
+.status-pill.commerce-acknowledged {
+  border-color: var(--green-mid);
+  background: var(--green-light);
+  color: var(--green-mid);
+}
+
+.status-pill.commerce-selectable {
+  border-color: color-mix(in srgb, var(--green) 45%, var(--border));
+}
+
+.worklist-empty {
+  padding: 42px 18px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  text-align: center;
+}
+
+.worklist-empty strong {
+  color: var(--text);
+}
+
+.pagination {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.pagination > :last-child {
+  justify-self: end;
+}
+
+@media (max-width: 820px) {
+  .worklist-filters,
+  .outgoing-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .selection-action-bar {
+    position: static;
+  }
+
+  .batch-review-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 /* Avery 8257 label sheet (0.75in x 2.25in, 30/sheet, 3 cols x 10 rows on

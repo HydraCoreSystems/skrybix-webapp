@@ -8,8 +8,10 @@ import {
   computePrintQueueBatch,
   commerceBatchMessage,
   printBatchMessage,
+  OUTGOING_REASONS,
   NON_SALE_OUTGOING_REASONS,
   type CuttingBatchRow,
+  type OutgoingReason,
   type NonSaleOutgoingReason,
 } from "@/lib/cuttings-batch";
 import { getSupabaseServerClient } from "@/lib/supabase";
@@ -20,6 +22,7 @@ export async function createCuttings(formData: FormData) {
   const motherId = String(formData.get("mother_id") || "").trim();
   const numCuts = Number(formData.get("num_cuts") || 0);
   const dateTaken = String(formData.get("date_taken") || "").trim() || new Date().toISOString().slice(0, 10);
+  const queueLabels = formData.get("queue_labels") === "yes";
 
   if (!motherId || numCuts < 1) {
     redirect("/cuttings/new?error=" + encodeURIComponent("Pick a mother plant and at least 1 cutting."));
@@ -61,6 +64,7 @@ export async function createCuttings(formData: FormData) {
       label_line1: mother.botanical_line1,
       label_line2: mother.botanical_line2,
       date_taken: dateTaken,
+      print_label: queueLabels,
     };
   });
 
@@ -72,8 +76,11 @@ export async function createCuttings(formData: FormData) {
   revalidatePath("/cuttings");
   revalidatePath("/");
   redirect(
-    "/cuttings?success=" +
-      encodeURIComponent(`Created ${rows.length} cutting(s): ${rows.map((r) => r.cutting_id).join(", ")}`)
+    "/cuttings?batch=" + encodeURIComponent(rows.map((r) => r.cutting_id).join(",")) +
+      "&success=" + encodeURIComponent(
+        `Created ${rows.length} cutting${rows.length === 1 ? "" : "s"}.` +
+        (queueLabels ? " Labels are queued for printing." : " Labels were not queued.")
+      )
   );
 }
 
@@ -212,7 +219,8 @@ export async function sendCuttingsToCommerce(cuttingIds: string[]): Promise<Batc
 // function (skrybix_push_cuttings_to_outgoing, supabase/schema.sql) so a
 // cutting can never be added to the outgoing log without being archived,
 // or archived without its outgoing record. Same "Sale" reason and qty as
-// before -- the button and its behavior on /cuttings are unchanged.
+// before. Retained as a compatibility action for older callers; the Phase 2
+// workbench no longer exposes a global "push every sold row" button.
 export async function pushSoldToOutgoingLog() {
   const supabase = getSupabaseServerClient();
 
@@ -302,5 +310,45 @@ export async function logNonSaleOutgoing(
         ? "Nothing new logged (already archived or unavailable)."
         : `${count} cutting${count === 1 ? "" : "s"} logged as ${reason} and archived.` +
           (skipped > 0 ? ` ${skipped} skipped (already archived or unavailable).` : ""),
+  };
+}
+
+// Phase 2 workbench path: one explicit selection, then a reviewed outgoing
+// reason. This replaces the risky global "push every sold row" UX while
+// reusing the same atomic, idempotent database function from Reliability
+// Phase 1. Skrybix records physical disposition only; sale price, customer,
+// order, and channel remain Commercial Ledger responsibilities.
+export async function logSelectedOutgoing(
+  cuttingIds: string[],
+  reason: OutgoingReason,
+  notes?: string
+): Promise<BatchActionResult> {
+  const ids = dedupeIds(cuttingIds);
+  if (ids.length === 0) return { ok: false, message: "Nothing selected to record." };
+  if (!OUTGOING_REASONS.includes(reason)) return { ok: false, message: "Choose a valid outgoing reason." };
+  const trimmedNotes = notes?.trim() || null;
+  if (reason === "Other" && !trimmedNotes) {
+    return { ok: false, message: 'Describe the reason when "Other" is selected.' };
+  }
+
+  const supabase = getSupabaseServerClient();
+  const { data: loggedCount, error } = await supabase.rpc("skrybix_push_cuttings_to_outgoing", {
+    p_cutting_ids: ids,
+    p_reason: reason,
+    p_notes: trimmedNotes,
+  });
+  if (error) return { ok: false, message: `Could not record outgoing cuttings: ${error.message}` };
+
+  const count = (loggedCount as number) ?? 0;
+  const skipped = ids.length - count;
+  revalidatePath("/cuttings");
+  revalidatePath("/outgoing");
+  revalidatePath("/");
+  return {
+    ok: true,
+    message: count === 0
+      ? "Nothing new recorded (already archived or unavailable)."
+      : `${count} cutting${count === 1 ? "" : "s"} recorded as ${reason} and removed from active inventory.` +
+        (skipped ? ` ${skipped} skipped (already archived or unavailable).` : ""),
   };
 }

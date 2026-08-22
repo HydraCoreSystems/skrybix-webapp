@@ -5,17 +5,20 @@
 // functions. The server actions orchestrate the database; the client table
 // component drives the UI; this module holds the honest decision logic.
 //
-// Print and GM Commerce selections are deliberately independent: they are
-// separate Sets with no cross-talk (selecting for print never selects for GM
-// Commerce and vice versa). The only shared concept is which rows are
-// currently visible after search/filter — see toggleSelectAllVisible.
+// The Phase 2 workbench uses one explicit row selection for every contextual
+// action. The mode-aware helpers below still compute which selected rows are
+// eligible for print, commerce, or outgoing without changing that selection.
 
-// Non-sale outgoing reasons -- shared between app/cuttings/actions.ts
+// Outgoing reasons -- shared between app/cuttings/actions.ts
 // (server-side validation) and CuttingsBatchTable.tsx (the reason
 // dropdown). Lives here, not in actions.ts, because a "use server" file
 // may only export async functions, not consts/types.
-export const NON_SALE_OUTGOING_REASONS = ["Gift", "Loss", "Disposal", "Trade", "Personal Use", "Other"] as const;
-export type NonSaleOutgoingReason = (typeof NON_SALE_OUTGOING_REASONS)[number];
+export const OUTGOING_REASONS = ["Sale", "Gift", "Loss", "Disposal", "Trade", "Personal Use", "Other"] as const;
+export type OutgoingReason = (typeof OUTGOING_REASONS)[number];
+// Compatibility aliases for existing imports/tests while the owner UI moves
+// from separate sale/non-sale paths to one explicit selected-items workflow.
+export const NON_SALE_OUTGOING_REASONS = OUTGOING_REASONS.filter((reason) => reason !== "Sale") as Exclude<OutgoingReason, "Sale">[];
+export type NonSaleOutgoingReason = Exclude<OutgoingReason, "Sale">;
 
 export type CuttingPrintState = "selectable" | "reprintable" | "queued";
 
@@ -28,6 +31,14 @@ export interface CuttingBatchRow {
   label_print_count: number;
   commerce_selected_at: string | null;
   commerce_acknowledged_at: string | null;
+}
+
+/** One row-selection model shared by every contextual batch action. */
+export function toggleUnifiedSelection(current: ReadonlySet<string>, cuttingId: string): Set<string> {
+  const next = new Set(current);
+  if (next.has(cuttingId)) next.delete(cuttingId);
+  else next.add(cuttingId);
+  return next;
 }
 
 // ---- Per-row status -------------------------------------------------------
@@ -69,7 +80,7 @@ export function isCommerceSelectable(
   return cuttingCommerceState(c) === "selectable";
 }
 
-// Non-sale outgoing logging has no persisted "queued"/"selected" state of
+// Outgoing logging has no persisted "queued"/"selected" state of
 // its own (unlike print/commerce) -- it's an immediate action, not a
 // queue. Every row the Cuttings page renders is already filtered to
 // archived_at is null (see app/cuttings/page.tsx), so any visible row is
@@ -86,7 +97,7 @@ export function isOutgoingSelectable(_c: CuttingBatchRow): boolean {
  * "Visible" means the rows currently displayed after search/filter (the caller
  * passes exactly those rows — never the whole database). Toggling selects (or
  * unselects) every currently-selectable visible row for the given mode. The
- * two modes share nothing; each call operates only on its own mode's Set.
+ * mode only determines eligibility; the caller owns the shared selection Set.
  */
 export function toggleSelectAllVisible(
   visibleRows: readonly CuttingBatchRow[],

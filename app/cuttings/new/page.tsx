@@ -42,9 +42,17 @@ export default async function NewCuttingPage({ searchParams }: { searchParams: {
         <label>Date taken</label>
         <input type="date" name="date_taken" />
 
+        <label className="creation-option">
+          <input type="checkbox" name="queue_labels" value="yes" defaultChecked />
+          <span>
+            <strong>Queue labels for this batch</strong>
+            <small>Recommended. You can review the new IDs before opening the print queue.</small>
+          </span>
+        </label>
+
         <p>
           <button className="btn" type="submit">
-            Create Cuttings
+            Create and review batch
           </button>
         </p>
       </form>
