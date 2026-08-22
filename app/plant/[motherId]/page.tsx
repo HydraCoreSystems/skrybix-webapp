@@ -6,22 +6,32 @@ export const dynamic = "force-dynamic";
 
 export default async function PublicPlantPage({ params }: { params: { motherId: string } }) {
   const supabase = getSupabaseServerClient();
-  const { data: motherRaw } = await supabase
+  const { data: motherRaw, error: motherError } = await supabase
     .from("mother_plants")
     .select("*")
     .eq("mother_id", params.motherId)
     .maybeSingle();
+
+  // A real DB error must not look identical to "this plant doesn't exist" --
+  // a transient Supabase hiccup on a customer's scanned QR code should show
+  // a visible failure, not a dead-link-looking 404.
+  if (motherError) {
+    throw new Error(`Unable to load this plant: ${motherError.message}`);
+  }
 
   const mother = motherRaw as MotherPlant | null;
   if (!mother) notFound();
 
   await supabase.rpc("increment_mother_scan_count", { p_mother_id: params.motherId });
 
-  const { data: cuttingsRaw } = await supabase
+  const { data: cuttingsRaw, error: cuttingsError } = await supabase
     .from("cuttings")
     .select("*")
     .eq("mother_id", params.motherId)
     .order("cutting_id");
+  if (cuttingsError) {
+    throw new Error(`Unable to load cuttings for this plant: ${cuttingsError.message}`);
+  }
   const cuttings = (cuttingsRaw ?? []) as Cutting[];
 
   return (

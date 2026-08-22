@@ -7,7 +7,13 @@ export const dynamic = "force-dynamic";
 
 export default async function NewMotherPage({ searchParams }: { searchParams: { error?: string } }) {
   const supabase = getSupabaseServerClient();
-  const { data: speciesRows } = await supabase.from("hoya_species").select("species").order("species");
+  const { data: speciesRows, error: speciesError } = await supabase
+    .from("hoya_species")
+    .select("species")
+    .order("species");
+  if (speciesError) {
+    throw new Error(`Unable to load the species list: ${speciesError.message}`);
+  }
   const speciesOptions = (speciesRows ?? []).map((r) => r.species as string);
 
   return (

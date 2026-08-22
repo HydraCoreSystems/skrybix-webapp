@@ -7,6 +7,7 @@ import {
   cuttingCommerceState,
   cuttingPrintState,
   isCommerceSelectable,
+  isOutgoingSelectable,
   isPrintSelectable,
   printBatchMessage,
   toggleSelectAllVisible,
@@ -137,4 +138,21 @@ test("commerceBatchMessage: reports sent and skipped totals honestly", () => {
     "2 cuttings sent to GM Commerce. 1 skipped (already selected or unavailable)."
   );
   assert.equal(commerceBatchMessage({ toSelect: [], alreadySelected: ["C1"], skipped: [] }), "Nothing new sent (1 already selected or unavailable).");
+});
+
+test("isOutgoingSelectable: every row is eligible (no persisted queue state, unlike print/commerce)", () => {
+  assert.equal(isOutgoingSelectable(row({ cutting_id: "C1" })), true);
+  assert.equal(
+    isOutgoingSelectable(row({ cutting_id: "C2", commerce_selected_at: "2026-01-01", print_label: true })),
+    true
+  );
+});
+
+test("toggleSelectAllVisible: outgoing mode selects all visible rows and is independent of print/commerce", () => {
+  const rows = [row({ cutting_id: "C1" }), row({ cutting_id: "C2", print_label: true })];
+  const outgoingSel = toggleSelectAllVisible(rows, new Set(), "outgoing");
+  // Unlike print, an already-queued row is still selectable for outgoing.
+  assert.deepEqual([...outgoingSel].sort(), ["C1", "C2"]);
+  const printSel = toggleSelectAllVisible(rows, new Set(), "print");
+  assert.deepEqual([...printSel].sort(), ["C1"]);
 });

@@ -7,7 +7,13 @@ export const dynamic = "force-dynamic";
 
 export default async function OutgoingPage({ searchParams }: { searchParams: { q?: string } }) {
   const supabase = getSupabaseServerClient();
-  const { data: rowsRaw } = await supabase.from("outgoing_log").select("*").order("id", { ascending: false });
+  const { data: rowsRaw, error: rowsError } = await supabase
+    .from("outgoing_log")
+    .select("*")
+    .order("id", { ascending: false });
+  if (rowsError) {
+    throw new Error(`Unable to load the outgoing log: ${rowsError.message}`);
+  }
   const allRows = (rowsRaw ?? []) as OutgoingLogEntry[];
   const q = searchParams.q ?? "";
   const rows = allRows.filter((r) =>

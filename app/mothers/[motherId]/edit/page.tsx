@@ -15,16 +15,29 @@ export default async function EditMotherPage({
   searchParams: { error?: string };
 }) {
   const supabase = getSupabaseServerClient();
-  const { data: motherRaw } = await supabase
+  const { data: motherRaw, error: motherError } = await supabase
     .from("mother_plants")
     .select("*")
     .eq("mother_id", params.motherId)
     .maybeSingle();
 
+  // A real DB error must not look identical to "this mother plant doesn't
+  // exist" -- editing a real record during a DB hiccup previously showed a
+  // 404, indistinguishable from the record genuinely being gone.
+  if (motherError) {
+    throw new Error(`Unable to load mother plant ${params.motherId}: ${motherError.message}`);
+  }
+
   const mother = motherRaw as MotherPlant | null;
   if (!mother) notFound();
 
-  const { data: speciesRows } = await supabase.from("hoya_species").select("species").order("species");
+  const { data: speciesRows, error: speciesError } = await supabase
+    .from("hoya_species")
+    .select("species")
+    .order("species");
+  if (speciesError) {
+    throw new Error(`Unable to load the species list: ${speciesError.message}`);
+  }
   const speciesOptions = (speciesRows ?? []).map((r) => r.species as string);
 
   const boundUpdate = updateMother.bind(null, mother.mother_id);

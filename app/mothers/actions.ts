@@ -95,10 +95,15 @@ export async function updateMother(motherId: string, formData: FormData) {
 
 export async function toggleMotherField(motherId: string, field: "sold" | "print_label", value: boolean) {
   const supabase = getSupabaseServerClient();
-  await supabase
+  const { error } = await supabase
     .from("mother_plants")
     .update({ [field]: value })
     .eq("mother_id", motherId);
+  // See the matching comment on toggleCuttingField -- a swallowed error
+  // here previously meant a click could silently no-op.
+  if (error) {
+    throw new Error(`Could not update ${motherId}: ${error.message}`);
+  }
   revalidatePath("/mothers");
   if (field === "print_label") {
     revalidatePath("/labels/mothers");

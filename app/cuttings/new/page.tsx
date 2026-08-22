@@ -6,7 +6,16 @@ export const dynamic = "force-dynamic";
 
 export default async function NewCuttingPage({ searchParams }: { searchParams: { error?: string } }) {
   const supabase = getSupabaseServerClient();
-  const { data: mothersRaw } = await supabase.from("mother_plants").select("mother_id, display_name").order("mother_id");
+  const { data: mothersRaw, error: mothersError } = await supabase
+    .from("mother_plants")
+    .select("mother_id, display_name")
+    .order("mother_id");
+  // A failed query here previously rendered an empty (but "required") mother
+  // dropdown -- believable as "no mother plants exist yet," not as a DB
+  // outage, and it silently blocks the whole take-cuttings workflow.
+  if (mothersError) {
+    throw new Error(`Unable to load mother plants: ${mothersError.message}`);
+  }
   const mothers = (mothersRaw ?? []) as Pick<MotherPlant, "mother_id" | "display_name">[];
 
   return (
