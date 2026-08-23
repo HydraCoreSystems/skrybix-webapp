@@ -10,8 +10,8 @@ import {
   type HoyaSpeciesRecord,
 } from "@/lib/hoya-library";
 
-export default function HoyaLibrary({ records }: { records: HoyaSpeciesRecord[] }) {
-  const [query, setQuery] = useState("");
+export default function HoyaLibrary({ records, initialQuery = "" }: { records: HoyaSpeciesRecord[]; initialQuery?: string }) {
+  const [query, setQuery] = useState(initialQuery);
   const [filter, setFilter] = useState<CollectionFilter>("all");
   const [region, setRegion] = useState("");
   const deferredQuery = useDeferredValue(query);

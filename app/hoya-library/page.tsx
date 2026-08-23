@@ -9,7 +9,7 @@ export const revalidate = 0;
 export default async function HoyaLibraryPage({
   searchParams,
 }: {
-  searchParams: { success?: string; error?: string };
+  searchParams: { success?: string; error?: string; q?: string };
 }) {
   const supabase = getSupabaseServerClient();
   const { data, error } = await supabase.from("hoya_species").select("*").order("species");
@@ -19,7 +19,7 @@ export default async function HoyaLibraryPage({
     <div className="hoya-library-page">
       {searchParams.success && <div className="flash success">{searchParams.success}</div>}
       {searchParams.error && <div className="flash error">{searchParams.error}</div>}
-      <HoyaLibrary records={(data ?? []) as HoyaSpeciesRecord[]} />
+      <HoyaLibrary records={(data ?? []) as HoyaSpeciesRecord[]} initialQuery={searchParams.q ?? ""} />
       <p className="library-source-note">
         Reference data is a stored POWO/Kew-derived snapshot, not a live Kew feed. Collection status means a species has been
         recorded as owned at least once; it is intentionally not removed when an individual plant leaves the collection.

@@ -67,6 +67,7 @@ export async function createMother(formData: FormData) {
   await markSpeciesOwnedIfNeeded(naming.species);
 
   revalidatePath("/mothers");
+  revalidatePath(`/mothers/${motherId}`);
   redirect("/mothers?success=" + encodeURIComponent(`Mother plant "${motherId}" added.`));
 }
 
@@ -90,6 +91,7 @@ export async function updateMother(motherId: string, formData: FormData) {
   await markSpeciesOwnedIfNeeded(naming.species);
 
   revalidatePath("/mothers");
+  revalidatePath(`/mothers/${motherId}`);
   redirect("/mothers?success=" + encodeURIComponent(`Mother plant "${motherId}" updated.`));
 }
 
@@ -105,6 +107,7 @@ export async function toggleMotherField(motherId: string, field: "sold" | "print
     throw new Error(`Could not update ${motherId}: ${error.message}`);
   }
   revalidatePath("/mothers");
+  revalidatePath(`/mothers/${motherId}`);
   if (field === "print_label") {
     revalidatePath("/labels/mothers");
   }
@@ -154,5 +157,6 @@ export async function selectMotherForCommerce(
   }
 
   revalidatePath("/mothers");
+  revalidatePath(`/mothers/${normalizedMotherId}`);
   return { ok: true, sku: sku as string };
 }
