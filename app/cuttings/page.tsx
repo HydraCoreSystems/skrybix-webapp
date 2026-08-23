@@ -89,13 +89,13 @@ export default async function CuttingsPage({
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <div className="card">
+    <div className="card workbench-page cuttings-workbench">
       {searchParams.success && <div className="flash success">{searchParams.success}</div>}
       {searchParams.error && <div className="flash error">{searchParams.error}</div>}
-      <div className="page-header">
-        <h3>Cuttings</h3>
+      <div className="page-header workbench-heading">
+        <div><p className="eyebrow">Propagation inventory</p><h1>Cuttings</h1><p>Select once, then move a batch into labels, GM Commerce, or permanent outgoing history.</p></div>
         <div className="actions">
-          <Link className="btn" href="/cuttings/new">
+          <Link className="btn warm" href="/cuttings/new">
             + Take Cuttings
           </Link>
           <Link className="btn secondary" href="/labels/cuttings">

@@ -34,8 +34,8 @@ export default function ThemePicker() {
   }, [theme, ready]);
 
   return (
-    <div className="card">
-      <h3 style={{ marginTop: 0 }}>Appearance</h3>
+    <div className="card settings-option-card">
+      <p className="eyebrow">Display</p><h3>Appearance</h3>
       <label htmlFor="theme">Theme</label>
       <select id="theme" value={theme} onChange={(e) => setTheme(e.target.value as ThemeChoice)}>
         <option value="system">System</option>

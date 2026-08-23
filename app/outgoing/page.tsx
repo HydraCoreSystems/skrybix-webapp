@@ -46,8 +46,8 @@ export default async function OutgoingPage({ searchParams }: { searchParams: { q
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const filtered = Boolean(q || reason || dateFrom || dateTo);
 
-  return <div className="card">
-    <div className="page-header"><div><p className="eyebrow">Permanent inventory history</p><h3>Outgoing Log</h3></div><Link className="btn secondary" href="/cuttings">Return to active cuttings</Link></div>
+  return <div className="card workbench-page outgoing-workbench">
+    <div className="page-header workbench-heading"><div><p className="eyebrow">Permanent inventory history</p><h1>Outgoing Log</h1><p>A durable record of every cutting that left active inventory and why.</p></div><Link className="btn secondary" href="/cuttings">Return to active cuttings</Link></div>
     <div className="outgoing-boundary"><strong>Skrybix records physical disposition.</strong><span>For a sale's price, marketplace, customer, or order details, use the Commercial Ledger in GM Commerce.</span></div>
     <form className="worklist-filters outgoing-filters" method="get">
       <label><span>Find outgoing plants</span><input type="search" name="q" defaultValue={q} placeholder="Cutting ID, plant, platform, or notes…" /></label>

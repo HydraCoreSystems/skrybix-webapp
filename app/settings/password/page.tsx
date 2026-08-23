@@ -11,8 +11,8 @@ export default function ChangePasswordPage({
   return (
     <>
       <ThemePicker />
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Update Site Password</h3>
+      <div className="card record-form-page compact-form-page">
+        <p className="eyebrow">Owner access</p><h1>Update Site Password</h1>
         {searchParams.success && <div className="flash success">{searchParams.success}</div>}
         {searchParams.error && <div className="flash error">{searchParams.error}</div>}
         <form action={changePassword}>
@@ -26,7 +26,7 @@ export default function ChangePasswordPage({
           <input type="password" name="confirm_password" required minLength={8} />
 
           <p>
-            <button className="btn" type="submit">
+            <button className="btn warm" type="submit">
               Update Password
             </button>
           </p>

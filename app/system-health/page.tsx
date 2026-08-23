@@ -52,7 +52,7 @@ export default async function SystemHealthPage() {
   const lastAcknowledgement = latestTimestamp(commerceRecords.map((row) => row.commerceAcknowledgedAt));
   const lastOutgoing = latestTimestamp(outgoing.map((row) => row.created_at || row.date_out));
 
-  return <div className="operations-health">
+  return <div className="operations-health visual-reference-page">
     <section className="card operations-hero"><div><p className="eyebrow">Owner operations</p><h1>System Health</h1><p>Live, read-only checks against the authoritative Skrybix database. Normal work queues are separated from conditions needing attention.</p></div><span className={`health-verdict ${health.integrityIssueCount ? "danger" : health.attentionCount ? "attention" : "healthy"}`}>{health.integrityIssueCount ? "Integrity attention required" : health.attentionCount ? `${health.attentionCount} item${health.attentionCount === 1 ? "" : "s"} need review` : "Operational checks clear"}</span></section>
 
     <div className="health-check-grid">
