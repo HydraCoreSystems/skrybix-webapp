@@ -98,6 +98,7 @@ export async function toggleCuttingField(cuttingId: string, field: "sold" | "pri
     throw new Error(`Could not update ${cuttingId}: ${error.message}`);
   }
   revalidatePath("/cuttings");
+  revalidatePath(`/cuttings/${encodeURIComponent(cuttingId)}`);
   if (field === "print_label") {
     revalidatePath("/labels/cuttings");
   }
@@ -130,6 +131,7 @@ export async function selectCuttingForCommerce(cuttingId: string): Promise<Comme
 
   revalidatePath("/cuttings");
   revalidatePath("/mothers");
+  revalidatePath(`/cuttings/${encodeURIComponent(normalizedCuttingId)}`);
   return { ok: true, sku: sku as string };
 }
 
@@ -173,6 +175,7 @@ export async function queueCuttingsForPrint(cuttingIds: string[]): Promise<Batch
 
   revalidatePath("/cuttings");
   revalidatePath("/labels/cuttings");
+  ids.forEach((id) => revalidatePath(`/cuttings/${encodeURIComponent(id)}`));
   return { ok: true, message: printBatchMessage(plan) };
 }
 
@@ -208,6 +211,7 @@ export async function sendCuttingsToCommerce(cuttingIds: string[]): Promise<Batc
 
   revalidatePath("/cuttings");
   revalidatePath("/mothers");
+  ids.forEach((id) => revalidatePath(`/cuttings/${encodeURIComponent(id)}`));
   return { ok: true, message: commerceBatchMessage(plan) };
 }
 
@@ -300,6 +304,7 @@ export async function logNonSaleOutgoing(
   const count = (loggedCount as number) ?? 0;
   const skipped = ids.length - count;
 
+  ids.forEach((id) => revalidatePath(`/cuttings/${encodeURIComponent(id)}`));
   revalidatePath("/cuttings");
   revalidatePath("/outgoing");
   revalidatePath("/");
@@ -341,6 +346,7 @@ export async function logSelectedOutgoing(
 
   const count = (loggedCount as number) ?? 0;
   const skipped = ids.length - count;
+  ids.forEach((id) => revalidatePath(`/cuttings/${encodeURIComponent(id)}`));
   revalidatePath("/cuttings");
   revalidatePath("/outgoing");
   revalidatePath("/");
