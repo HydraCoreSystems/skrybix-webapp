@@ -1620,17 +1620,30 @@ header.topnav .brand small { margin-top: 4px; color: rgba(242,229,203,.64); font
     margin: 0;
   }
   header.topnav,
-  .no-print {
+  .no-print,
+  .site-atmosphere {
     display: none !important;
   }
   body,
-  main {
-    margin: 0;
-    padding: 0;
+  main,
+  main.site-main {
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: none !important;
+    position: static !important;
+    z-index: auto !important;
+    background: #fff !important;
+  }
+  .label-sheet {
     max-width: none;
+    overflow: visible;
   }
   .card {
-    border: none;
-    padding: 0;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
   }
 }

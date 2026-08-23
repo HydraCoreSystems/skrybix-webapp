@@ -1,6 +1,30 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { chunkIntoSheets, parseStartPosition, sizeClassForLine, LABELS_PER_SHEET } from "./labels.ts";
+
+const globalCss = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+
+test("print layout hides the decorative site atmosphere", () => {
+  assert.match(
+    globalCss,
+    /@media print[\s\S]*?\.site-atmosphere\s*\{\s*display:\s*none !important;/,
+  );
+});
+
+test("print layout overrides the higher-specificity site-main spacing", () => {
+  assert.match(
+    globalCss,
+    /@media print[\s\S]*?main\.site-main\s*\{[\s\S]*?margin:\s*0 !important;[\s\S]*?padding:\s*0 !important;[\s\S]*?position:\s*static !important;/,
+  );
+});
+
+test("print layout strips the screen card treatment", () => {
+  assert.match(
+    globalCss,
+    /@media print[\s\S]*?\.card\s*\{[\s\S]*?border:\s*none !important;[\s\S]*?box-shadow:\s*none !important;/,
+  );
+});
 
 test("sizeClassForLine: short names get the largest tier", () => {
   assert.equal(sizeClassForLine("Hoya carnosa"), "lg"); // 12 chars
