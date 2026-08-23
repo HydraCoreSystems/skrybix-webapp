@@ -47,7 +47,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <ThemeSync />
         <Nav />
-        <main>{children}</main>
+        <div className="site-atmosphere" aria-hidden="true" />
+        <main className="site-main">{children}</main>
       </body>
     </html>
   );

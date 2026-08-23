@@ -79,8 +79,22 @@ export default async function DashboardPage() {
   const commerceHealth = computeCommerceHandoffHealth(commerceRecords);
 
   return (
-    <>
-      <div className="stat-grid">
+    <div className="dashboard-page">
+      <section className="dashboard-hero">
+        <div>
+          <p className="eyebrow">Gathering Moss · Collection command</p>
+          <h1>Your living collection, in focus.</h1>
+          <p>Track the plants in your care, move propagation work forward, and keep every handoff visible from one calm workspace.</p>
+        </div>
+        <div className="dashboard-hero-actions">
+          <Link className="btn warm" href="/mothers/new">+ Add Mother Plant</Link>
+          <Link className="btn secondary warm" href="/cuttings/new">+ Take Cuttings</Link>
+        </div>
+      </section>
+
+      <section className="dashboard-section" aria-labelledby="collection-overview-heading">
+        <div className="section-heading"><div><p className="eyebrow">At a glance</p><h2 id="collection-overview-heading">Collection overview</h2></div><Link href="/system-health">View system health →</Link></div>
+        <div className="stat-grid dashboard-stat-grid">
         <Link className="stat stat-link" href="/mothers">
           <div className="num">{motherCount ?? 0}</div>
           <div className="label">Mother Plants</div>
@@ -105,10 +119,12 @@ export default async function DashboardPage() {
           <div className="num">{printCuttings ?? 0}</div>
           <div className="label">Cutting Labels Queued</div>
         </Link>
-      </div>
+        </div>
+      </section>
 
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Recent Outgoing Activity</h3>
+      <div className="dashboard-columns">
+      <section className="card dashboard-panel">
+        <div className="section-heading compact"><div><p className="eyebrow">Movement</p><h2>Recent outgoing activity</h2></div><Link href="/outgoing">Open log →</Link></div>
         {recentOutgoing.length ? (
           <table>
             <thead>
@@ -135,10 +151,10 @@ export default async function DashboardPage() {
         ) : (
           <p>No outgoing activity yet.</p>
         )}
-      </div>
+      </section>
 
-      <div className="card">
-        <div className="page-header"><h3 style={{ marginTop: 0 }}>GM Commerce handoff health</h3><Link className="btn small secondary" href="/system-health">Open System Health</Link></div>
+      <section className="card dashboard-panel commerce-panel">
+        <div className="section-heading compact"><div><p className="eyebrow">Connected workflow</p><h2>GM Commerce handoffs</h2></div><Link href="/system-health">Inspect →</Link></div>
         <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 0 }}>
           Owner-visible only -- reads the same selection/acknowledgement timestamps the existing narrow
           authenticated export API already uses. No new access is granted to GM Commerce by this view.
@@ -178,17 +194,8 @@ export default async function DashboardPage() {
           </table>
         )}
         <p style={{ color: "var(--muted)", fontSize: 12, marginBottom: 0 }}>System Health adds the operational checks this dashboard can derive honestly, while keeping unprovable infrastructure claims out of the UI.</p>
+      </section>
       </div>
-
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Quick actions</h3>
-        <Link className="btn" href="/mothers/new">
-          + Add Mother Plant
-        </Link>{" "}
-        <Link className="btn" href="/cuttings/new">
-          + Take Cuttings
-        </Link>
-      </div>
-    </>
+    </div>
   );
 }
