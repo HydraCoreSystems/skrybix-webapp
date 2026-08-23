@@ -1064,6 +1064,25 @@ label {
   .mother-filters, .mother-facts { grid-template-columns: 1fr; }
 }
 
+.outgoing-boundary { display: grid; gap: 3px; margin-bottom: 16px; padding: 12px 14px; border-left: 4px solid var(--green-mid); background: var(--green-light); }
+.outgoing-boundary span { color: var(--muted); font-size: 13px; }
+.outgoing-filters { grid-template-columns: minmax(240px, 1.5fr) minmax(130px, .7fr) minmax(135px, .6fr) minmax(135px, .6fr) auto auto; }
+.outgoing-history-list { display: grid; gap: 10px; }
+.outgoing-history-card { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+.outgoing-history-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.outgoing-history-heading strong, .outgoing-history-heading code, .outgoing-history-heading time { display: block; }
+.outgoing-history-heading code { margin-top: 4px; color: var(--green-mid); }
+.outgoing-history-heading time { margin-top: 6px; color: var(--muted); font-size: 12px; text-align: right; }
+.outgoing-history-facts { display: grid; grid-template-columns: .35fr .8fr 1.5fr; gap: 16px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.outgoing-history-facts span { display: grid; gap: 3px; }
+.outgoing-history-facts small { color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+
+@media (max-width: 900px) {
+  .outgoing-filters, .outgoing-history-facts { grid-template-columns: 1fr; }
+  .outgoing-history-heading { align-items: flex-start; flex-direction: column; }
+  .outgoing-history-heading time { text-align: left; }
+}
+
 /* Avery 8257 label sheet (0.75in x 2.25in, 30/sheet, 3 cols x 10 rows on
    US Letter). Margins/gaps below are the OnlineLabels OL6950 product's
    CONFIRMED exact spec for the identical label footprint -- a real,
