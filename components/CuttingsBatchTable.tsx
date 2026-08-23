@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { logSelectedOutgoing, queueCuttingsForPrint, sendCuttingsToCommerce, toggleCuttingField } from "@/app/cuttings/actions";
 import { cuttingCommerceState, cuttingPrintState, OUTGOING_REASONS, toggleUnifiedSelection, type CuttingBatchRow, type OutgoingReason } from "@/lib/cuttings-batch";
 
@@ -126,8 +127,8 @@ export default function CuttingsBatchTable({ rows }: { rows: CuttingsTableRow[] 
             const selected = selection.has(row.cutting_id);
             return <tr key={row.cutting_id} className={selected ? "selected" : ""}>
               <td><input type="checkbox" aria-label={`Select ${row.cutting_id}`} checked={selected} onChange={() => toggleOne(row.cutting_id)} /></td>
-              <td><strong>{row.cutting_id}</strong></td>
-              <td><span>{row.motherDisplayName || "Unnamed mother"}</span><small>{row.motherId}</small></td>
+              <td><strong><Link href={`/cuttings/${encodeURIComponent(row.cutting_id)}`}>{row.cutting_id}</Link></strong></td>
+              <td><span><Link href={`/mothers/${encodeURIComponent(row.motherId)}`}>{row.motherDisplayName || "Unnamed mother"}</Link></span><small>{row.motherId}</small></td>
               <td>{row.dateTaken || "—"}</td>
               <td><span className={`status-pill ${printState}`}>{printState === "queued" ? "Queued" : printState === "reprintable" ? "Reprint available" : "Not printed"}</span>{printedLabelText(row) && <small>{printedLabelText(row)}</small>}</td>
               <td><span className={`status-pill commerce-${commerceState}`}>{commerceState === "acknowledged" ? "Received" : commerceState === "selected" ? "Waiting" : "Ready"}</span></td>
