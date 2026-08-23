@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --test lib/commerce-export.test.ts lib/labels.test.ts lib/cuttings-batch.test.ts lib/commerce-health.test.ts lib/hoya-library.test.ts lib/cutting-profile.test.ts && node --experimental-loader ./scripts/test-at-alias-loader.mjs --test scripts/run-route-tests.mjs"
+    "test": "node --test lib/commerce-export.test.ts lib/labels.test.ts lib/cuttings-batch.test.ts lib/commerce-health.test.ts lib/hoya-library.test.ts lib/cutting-profile.test.ts && node --experimental-loader ./scripts/test-at-alias-loader.mjs --test lib/operations-health.test.ts scripts/run-route-tests.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

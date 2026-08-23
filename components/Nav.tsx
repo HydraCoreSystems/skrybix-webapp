@@ -10,7 +10,8 @@ const LINKS = [
   { href: "/cuttings", label: "Cuttings" },
   { href: "/hoya-library", label: "Hoya Library" },
   { href: "/outgoing", label: "Outgoing Log" },
-  { href: "/settings/password", label: "Settings" },
+  { href: "/system-health", label: "System Health" },
+  { href: "/settings", label: "Settings" },
 ];
 
 export default function Nav() {
