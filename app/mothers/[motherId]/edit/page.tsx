@@ -4,6 +4,7 @@ import { updateMother } from "../../actions";
 import MotherNamingFields from "@/components/MotherNamingFields";
 import LocationSelect from "@/components/LocationSelect";
 import type { MotherPlant } from "@/lib/types";
+import { routeRecordId } from "@/lib/route-record-id";
 
 export const dynamic = "force-dynamic";
 
@@ -15,17 +16,18 @@ export default async function EditMotherPage({
   searchParams: { error?: string };
 }) {
   const supabase = getSupabaseServerClient();
+  const motherId = routeRecordId(params.motherId);
   const { data: motherRaw, error: motherError } = await supabase
     .from("mother_plants")
     .select("*")
-    .eq("mother_id", params.motherId)
+    .eq("mother_id", motherId)
     .maybeSingle();
 
   // A real DB error must not look identical to "this mother plant doesn't
   // exist" -- editing a real record during a DB hiccup previously showed a
   // 404, indistinguishable from the record genuinely being gone.
   if (motherError) {
-    throw new Error(`Unable to load mother plant ${params.motherId}: ${motherError.message}`);
+    throw new Error(`Unable to load mother plant ${motherId}: ${motherError.message}`);
   }
 
   const mother = motherRaw as MotherPlant | null;
