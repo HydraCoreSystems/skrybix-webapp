@@ -138,7 +138,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>GM Commerce handoff health</h3>
+        <div className="page-header"><h3 style={{ marginTop: 0 }}>GM Commerce handoff health</h3><Link className="btn small secondary" href="/system-health">Open System Health</Link></div>
         <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 0 }}>
           Owner-visible only -- reads the same selection/acknowledgement timestamps the existing narrow
           authenticated export API already uses. No new access is granted to GM Commerce by this view.
@@ -169,7 +169,7 @@ export default async function DashboardPage() {
             <tbody>
               {commerceHealth.waitingLongRecords.map((r) => (
                 <tr key={`${r.plantRecordType}-${r.sourceRecordId}`}>
-                  <td><Link href={r.plantRecordType === "cutting" ? `/cuttings?q=${encodeURIComponent(r.sourceRecordId)}` : `/mothers?q=${encodeURIComponent(r.sourceRecordId)}`}>{r.sourceRecordId}</Link></td>
+                  <td><Link href={r.plantRecordType === "cutting" ? `/cuttings/${encodeURIComponent(r.sourceRecordId)}` : `/mothers/${encodeURIComponent(r.sourceRecordId)}`}>{r.sourceRecordId}</Link></td>
                   <td>{r.plantRecordType}</td>
                   <td>{new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(r.commerceSelectedAt as string))}</td>
                 </tr>
@@ -177,10 +177,7 @@ export default async function DashboardPage() {
             </tbody>
           </table>
         )}
-        <p style={{ color: "var(--muted)", fontSize: 12, marginBottom: 0 }}>
-          Actionable failure / reconciliation attention: not tracked yet -- this schema has no failure-event log
-          to source that from honestly. Flagged as a beta follow-up rather than a fabricated status.
-        </p>
+        <p style={{ color: "var(--muted)", fontSize: 12, marginBottom: 0 }}>System Health adds the operational checks this dashboard can derive honestly, while keeping unprovable infrastructure claims out of the UI.</p>
       </div>
 
       <div className="card">
