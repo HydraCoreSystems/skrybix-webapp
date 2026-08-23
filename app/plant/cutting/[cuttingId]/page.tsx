@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { routeRecordId } from "@/lib/route-record-id";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { CUTTING_INSTAGRAM_URL } from "@/lib/qr";
 
@@ -12,11 +13,12 @@ export const dynamic = "force-dynamic";
 // still carrying the old Skrybix-URL QR: it records the scan, then
 // redirects here too, so an old label doesn't show any internal app UI.
 export default async function PublicCuttingPage({ params }: { params: { cuttingId: string } }) {
+  const cuttingId = routeRecordId(params.cuttingId);
   const supabase = getSupabaseServerClient();
   const { data: cuttingRaw, error: cuttingError } = await supabase
     .from("cuttings")
     .select("cutting_id")
-    .eq("cutting_id", params.cuttingId)
+    .eq("cutting_id", cuttingId)
     .maybeSingle();
 
   // Same reasoning as the mother plant page: a DB error must surface
@@ -26,7 +28,7 @@ export default async function PublicCuttingPage({ params }: { params: { cuttingI
   }
   if (!cuttingRaw) notFound();
 
-  await supabase.rpc("increment_cutting_scan_count", { p_cutting_id: params.cuttingId });
+  await supabase.rpc("increment_cutting_scan_count", { p_cutting_id: cuttingId });
 
   redirect(CUTTING_INSTAGRAM_URL);
 }

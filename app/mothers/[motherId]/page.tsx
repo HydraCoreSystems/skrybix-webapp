@@ -5,6 +5,7 @@ import { getCommerceHandoffState } from "@/lib/commerce-export";
 import type { HoyaSpeciesRecord } from "@/lib/hoya-library";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import type { Cutting, MotherPlant, OutgoingLogEntry } from "@/lib/types";
+import { routeRecordId } from "@/lib/route-record-id";
 import { toggleMotherField } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -18,8 +19,9 @@ function dateLabel(value: string | null) {
 
 export default async function MotherProfilePage({ params }: { params: { motherId: string } }) {
   const supabase = getSupabaseServerClient();
-  const { data: motherRaw, error: motherError } = await supabase.from("mother_plants").select("*").eq("mother_id", params.motherId).maybeSingle();
-  if (motherError) throw new Error(`Unable to load mother plant ${params.motherId}: ${motherError.message}`);
+  const motherId = routeRecordId(params.motherId);
+  const { data: motherRaw, error: motherError } = await supabase.from("mother_plants").select("*").eq("mother_id", motherId).maybeSingle();
+  if (motherError) throw new Error(`Unable to load mother plant ${motherId}: ${motherError.message}`);
   if (!motherRaw) notFound();
   const mother = motherRaw as MotherPlant;
   const { data: cuttingsRaw, error: cuttingsError } = await supabase.from("cuttings").select("*").eq("mother_id", mother.mother_id).order("created_at", { ascending: false });

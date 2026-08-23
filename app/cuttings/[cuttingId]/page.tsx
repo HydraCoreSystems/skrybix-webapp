@@ -5,6 +5,7 @@ import { getCommerceHandoffState } from "@/lib/commerce-export";
 import { cuttingHandoffLabel, cuttingInventoryState } from "@/lib/cutting-profile";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import type { Cutting, MotherPlant, OutgoingLogEntry } from "@/lib/types";
+import { routeRecordId } from "@/lib/route-record-id";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -17,8 +18,9 @@ function dateLabel(value: string | null) {
 
 export default async function CuttingProfilePage({ params }: { params: { cuttingId: string } }) {
   const supabase = getSupabaseServerClient();
-  const { data: cuttingRaw, error: cuttingError } = await supabase.from("cuttings").select("*").eq("cutting_id", params.cuttingId).maybeSingle();
-  if (cuttingError) throw new Error(`Unable to load cutting ${params.cuttingId}: ${cuttingError.message}`);
+  const cuttingId = routeRecordId(params.cuttingId);
+  const { data: cuttingRaw, error: cuttingError } = await supabase.from("cuttings").select("*").eq("cutting_id", cuttingId).maybeSingle();
+  if (cuttingError) throw new Error(`Unable to load cutting ${cuttingId}: ${cuttingError.message}`);
   if (!cuttingRaw) notFound();
   const cutting = cuttingRaw as Cutting;
 

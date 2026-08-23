@@ -13,6 +13,7 @@ const PRIMARY_LINKS = [
 ];
 
 const UTILITY_LINKS = [
+  { href: "/guide", label: "Guide" },
   { href: "/system-health", label: "System Health" },
   { href: "/settings", label: "Settings" },
 ];
