@@ -19,8 +19,8 @@ export default async function NewCuttingPage({ searchParams }: { searchParams: {
   const mothers = (mothersRaw ?? []) as Pick<MotherPlant, "mother_id" | "display_name">[];
 
   return (
-    <div className="card">
-      <h3 style={{ marginTop: 0 }}>Take Cuttings</h3>
+    <div className="card record-form-page">
+      <p className="eyebrow">Propagation record</p><h1>Take Cuttings</h1>
       <p style={{ color: "var(--muted)", fontSize: 13 }}>
         Generates unique Cutting IDs the same way the Sheet did (Mother_ID-C01, -C02, ...) using a persistent,
         never-reused counter — no row-scanning fragility.
@@ -51,7 +51,7 @@ export default async function NewCuttingPage({ searchParams }: { searchParams: {
         </label>
 
         <p>
-          <button className="btn" type="submit">
+          <button className="btn warm" type="submit">
             Create and review batch
           </button>
         </p>

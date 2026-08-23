@@ -43,8 +43,8 @@ export default async function EditMotherPage({
   const boundUpdate = updateMother.bind(null, mother.mother_id);
 
   return (
-    <div className="card">
-      <h3 style={{ marginTop: 0 }}>Edit Mother Plant</h3>
+    <div className="card record-form-page">
+      <p className="eyebrow">Collection record</p><h1>Edit Mother Plant</h1>
       {searchParams.error && <div className="flash error">{searchParams.error}</div>}
       <form action={boundUpdate}>
         <label>Mother ID (cannot be changed)</label>
@@ -71,7 +71,7 @@ export default async function EditMotherPage({
         />
 
         <p>
-          <button className="btn" type="submit">
+          <button className="btn warm" type="submit">
             Save
           </button>{" "}
           <a className="btn secondary" href="/mothers">

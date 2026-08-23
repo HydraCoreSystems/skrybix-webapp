@@ -1257,6 +1257,103 @@ header.topnav .brand small { margin-top: 4px; color: rgba(242,229,203,.64); font
   .btn:hover, .stat-link:hover { transform: none; }
 }
 
+/* Phase 3B rollout — workbenches, system surfaces, forms, and responsive tables. */
+.workbench-page { margin: 0; padding: clamp(22px, 3.5vw, 38px); border-radius: 22px; background: var(--surface-glass); backdrop-filter: blur(16px); box-shadow: 0 22px 54px rgba(5,20,12,.16); }
+.workbench-heading { align-items: flex-end; padding-bottom: 22px; border-bottom: 1px solid color-mix(in srgb, var(--copper) 28%, var(--border)); }
+.workbench-heading h1, .settings-hero h1, .operations-hero h1 { margin: 5px 0 8px; font: 500 clamp(34px,4.4vw,52px)/1 Georgia, "Times New Roman", serif; letter-spacing: -.035em; }
+.workbench-heading p:not(.eyebrow) { max-width: 680px; margin: 0; color: var(--muted); line-height: 1.55; }
+.workbench-page .worklist-filters { margin: 22px 0 14px; padding: 18px; border-radius: 16px; border-color: color-mix(in srgb, var(--green-mid) 25%, var(--border)); background: color-mix(in srgb, var(--card) 70%, transparent); box-shadow: inset 0 1px 0 rgba(255,255,255,.04); }
+.workbench-page .worklist-filters label > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.workbench-page input, .workbench-page select, .visual-reference-page input, .visual-reference-page select { min-height: 42px; border-color: color-mix(in srgb, var(--green-mid) 25%, var(--border)); background: color-mix(in srgb, var(--card) 88%, transparent); }
+.worklist-result-count { margin: 10px 2px 16px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+
+.mother-worklist { gap: 14px; }
+.mother-worklist-card { position: relative; overflow: hidden; padding: 20px; border-radius: 16px; background: color-mix(in srgb, var(--card) 82%, transparent); box-shadow: 0 8px 22px rgba(5,20,12,.07); transition: border-color .15s ease, box-shadow .15s ease; }
+.mother-worklist-card::before { content: ""; position: absolute; left: 0; top: 18px; bottom: 18px; width: 3px; border-radius: 0 3px 3px 0; background: linear-gradient(var(--copper-bright), var(--copper)); opacity: .72; }
+.mother-worklist-card:focus-within { border-color: var(--green-mid); box-shadow: 0 12px 28px rgba(5,20,12,.12); }
+.mother-identity strong { font: 500 21px/1.2 Georgia, "Times New Roman", serif; }
+.mother-identity a { text-decoration-color: transparent; text-underline-offset: 4px; transition: color .15s ease, text-decoration-color .15s ease; }
+.mother-identity a:hover { color: var(--copper-bright); text-decoration-color: currentColor; }
+.mother-facts { background: color-mix(in srgb, var(--green-light) 35%, transparent); padding-inline: 12px; border-radius: 10px; border-block-color: color-mix(in srgb, var(--green-mid) 18%, var(--border)); }
+.mother-commerce { border-top-color: color-mix(in srgb, var(--copper) 28%, var(--border)); }
+.mother-commerce summary { width: fit-content; color: var(--copper-bright); text-underline-offset: 4px; }
+.mother-commerce summary:hover { text-decoration: underline; }
+
+.selection-action-bar { border-radius: 15px; border-color: color-mix(in srgb, var(--blue) 32%, var(--border)); background: color-mix(in srgb, var(--card) 76%, transparent); backdrop-filter: blur(14px); }
+.selection-action-bar.active { border-color: var(--blue); box-shadow: 0 14px 34px color-mix(in srgb, var(--blue) 14%, transparent); }
+.selection-action-bar > div:first-child span { color: var(--muted); }
+.worklist-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 15px; background: color-mix(in srgb, var(--card) 80%, transparent); }
+.worklist-table { min-width: 900px; }
+.worklist-table th { padding-block: 13px; background: color-mix(in srgb, var(--green-light) 38%, transparent); }
+.worklist-table td { padding-block: 13px; }
+.worklist-table tbody tr.selected { background: color-mix(in srgb, var(--blue) 12%, var(--card)); box-shadow: inset 3px 0 0 var(--blue); }
+.worklist-table td strong a { color: var(--copper-bright); text-underline-offset: 3px; }
+.worklist-table td small { display: block; margin-top: 4px; color: var(--muted); }
+.outgoing-confirmation { border-radius: 18px; border-color: var(--copper); background: radial-gradient(circle at 90% 0, color-mix(in srgb, var(--copper) 13%, transparent), transparent 31%), color-mix(in srgb, var(--card) 92%, transparent); box-shadow: 0 20px 48px rgba(5,20,12,.2); }
+
+.outgoing-boundary { margin: 20px 0; padding: 16px 18px; border-left-color: var(--blue); border-radius: 0 12px 12px 0; background: color-mix(in srgb, var(--blue) 10%, var(--card)); }
+.outgoing-history-list { gap: 13px; }
+.outgoing-history-card { position: relative; padding: 19px 20px; border-radius: 15px; background: color-mix(in srgb, var(--card) 82%, transparent); box-shadow: 0 8px 22px rgba(5,20,12,.06); }
+.outgoing-history-card::after { content: ""; position: absolute; right: 18px; bottom: 0; width: 58px; height: 2px; background: var(--copper); opacity: .52; }
+.outgoing-history-heading strong { font: 500 19px/1.2 Georgia, "Times New Roman", serif; }
+.outgoing-history-heading code { color: var(--copper-bright); }
+
+.operations-hero, .settings-hero { position: relative; overflow: hidden; padding: clamp(28px,4vw,46px); border-radius: 21px; color: #f5efdf; background: radial-gradient(circle at 88% 12%, rgba(126,176,192,.18), transparent 28%), linear-gradient(128deg, rgba(7,29,19,.98), rgba(25,65,42,.94)); box-shadow: 0 22px 54px rgba(5,20,12,.22); }
+.operations-hero::after, .settings-hero::after { content: ""; position: absolute; width: 300px; height: 300px; right: -165px; bottom: -220px; border: 1px solid rgba(234,220,193,.17); border-radius: 50%; box-shadow: 0 0 0 35px rgba(234,220,193,.025); }
+.operations-hero > *, .settings-hero > * { position: relative; z-index: 1; }
+.operations-hero p:not(.eyebrow), .settings-hero p { color: rgba(245,239,223,.72); }
+.health-verdict { border-color: rgba(245,239,223,.28); background: rgba(5,20,12,.35) !important; backdrop-filter: blur(10px); }
+.health-check-grid { gap: 15px; }
+.health-check { min-height: 225px; margin: 0; border-radius: 17px !important; background: var(--surface-glass) !important; backdrop-filter: blur(14px); }
+.health-check:nth-child(2) { border-top: 3px solid var(--copper); }
+.health-check:nth-child(3) { border-top: 3px solid var(--blue); }
+.health-check:nth-child(4) { border-top: 3px solid var(--amber); }
+.health-check h3 { font: 500 24px/1.15 Georgia, "Times New Roman", serif; }
+.health-attention-list article { border-radius: 12px; background: color-mix(in srgb, var(--card) 76%, transparent); }
+
+.settings-hub .profile-columns > .card { min-height: 190px; display: flex; flex-direction: column; align-items: flex-start; border-radius: 17px; }
+.settings-hub .profile-columns > .card p { flex: 1; color: var(--muted); line-height: 1.55; }
+.settings-hub .profile-columns > .card h3 { font: 500 25px/1.15 Georgia, "Times New Roman", serif; }
+.settings-option-card { border-radius: 17px; background: var(--surface-glass); backdrop-filter: blur(14px); }
+.settings-option-card h3 { margin: 5px 0 14px; font: 500 25px/1.15 Georgia, "Times New Roman", serif; }
+
+.record-form-page { max-width: 820px; margin: 0 auto; padding: clamp(26px,4vw,44px); border-radius: 22px; background: var(--surface-glass); backdrop-filter: blur(16px); box-shadow: 0 22px 54px rgba(5,20,12,.16); }
+.record-form-page h1 { margin: 6px 0 12px; font: 500 clamp(34px,4.2vw,50px)/1 Georgia, "Times New Roman", serif; letter-spacing: -.035em; }
+.record-form-page > p:not(.eyebrow) { max-width: 670px; color: var(--muted); line-height: 1.6; }
+.record-form-page form { display: grid; gap: 5px; margin-top: 24px; padding-top: 20px; border-top: 1px solid color-mix(in srgb, var(--copper) 28%, var(--border)); }
+.record-form-page form > label:not(.creation-option) { margin-top: 11px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.record-form-page input, .record-form-page select, .record-form-page textarea { width: 100%; min-height: 44px; background: color-mix(in srgb, var(--card) 88%, transparent); }
+.record-form-page input:disabled { color: var(--muted); background: color-mix(in srgb, var(--card) 54%, transparent); }
+.record-form-page form > p:last-child { margin: 20px 0 0; }
+.compact-form-page { max-width: 620px; }
+.creation-option { display: flex; align-items: flex-start; gap: 11px; margin-top: 18px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--green-light) 32%, transparent); }
+.creation-option input { width: auto; min-height: 0; margin-top: 3px; }
+.creation-option strong, .creation-option small { display: block; }
+.creation-option small { margin-top: 4px; color: var(--muted); line-height: 1.4; }
+
+.flash { border: 1px solid currentColor; box-shadow: var(--shadow-sm); }
+.worklist-empty { min-height: 180px; display: grid; place-content: center; background: color-mix(in srgb, var(--card) 65%, transparent); }
+.worklist-empty::before { content: "✦"; margin-bottom: 8px; color: var(--copper-bright); font-size: 24px; }
+.worklist-empty p { margin-bottom: 0; }
+
+@media (hover: hover) {
+  .mother-worklist-card:hover { border-color: color-mix(in srgb, var(--copper) 55%, var(--border)); }
+  .outgoing-history-card:hover { border-color: color-mix(in srgb, var(--copper) 45%, var(--border)); }
+}
+@media (max-width: 900px) {
+  .workbench-page { padding: 22px 18px; }
+  .workbench-heading { align-items: flex-start; }
+  .workbench-heading .actions { width: 100%; }
+  .workbench-heading .actions .btn { flex: 1 1 auto; justify-content: center; }
+  .health-check { min-height: auto; }
+}
+@media (max-width: 560px) {
+  .workbench-page { padding: 20px 14px; border-radius: 16px; }
+  .mother-worklist-card, .outgoing-history-card { padding: 17px 15px; }
+  .selection-action-bar .actions { width: 100%; }
+  .selection-action-bar .actions .btn { width: 100%; justify-content: center; }
+}
+
 /* Avery 8257 label sheet (0.75in x 2.25in, 30/sheet, 3 cols x 10 rows on
    US Letter). Margins/gaps below are the OnlineLabels OL6950 product's
    CONFIRMED exact spec for the identical label footprint -- a real,

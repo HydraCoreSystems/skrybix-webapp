@@ -53,10 +53,10 @@ export default async function MothersPage({ searchParams }: { searchParams: { su
   const total = count ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  return <div className="card">
+  return <div className="card workbench-page mothers-workbench">
     {searchParams.success && <div className="flash success">{searchParams.success}</div>}
     {searchParams.error && <div className="flash error">{searchParams.error}</div>}
-    <div className="page-header"><div><p className="eyebrow">Living collection</p><h3>Mother Plants</h3></div><div className="actions"><Link className="btn" href="/mothers/new">+ Add Mother Plant</Link><Link className="btn secondary" href="/labels/mothers">View queued labels</Link></div></div>
+    <div className="page-header workbench-heading"><div><p className="eyebrow">Living collection</p><h1>Mother Plants</h1><p>Care records, propagation sources, labels, and commerce readiness for every established plant.</p></div><div className="actions"><Link className="btn warm" href="/mothers/new">+ Add Mother Plant</Link><Link className="btn secondary" href="/labels/mothers">View queued labels</Link></div></div>
     <form className="worklist-filters mother-filters" method="get">
       <label><span>Find mother plants</span><input type="search" name="q" defaultValue={q} placeholder="ID, name, species, or cultivar…" /></label>
       <label><span>Work queue</span><select name="status" defaultValue={status}><option value="all">All mother plants</option><option value="labels">Labels queued</option><option value="commerce-ready">Ready for GM Commerce</option><option value="commerce-waiting">Waiting on GM Commerce</option><option value="sold">Marked sold</option></select></label>

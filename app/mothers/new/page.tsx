@@ -17,8 +17,8 @@ export default async function NewMotherPage({ searchParams }: { searchParams: { 
   const speciesOptions = (speciesRows ?? []).map((r) => r.species as string);
 
   return (
-    <div className="card">
-      <h3 style={{ marginTop: 0 }}>Add Mother Plant</h3>
+    <div className="card record-form-page">
+      <p className="eyebrow">Collection record</p><h1>Add Mother Plant</h1>
       <p style={{ marginTop: 0 }}>
         Mother ID and Display Name are assigned automatically from the species (or, if unidentified, the
         cultivar/descriptor text below) once you save.
@@ -31,7 +31,7 @@ export default async function NewMotherPage({ searchParams }: { searchParams: { 
         <MotherNamingFields speciesOptions={speciesOptions} />
 
         <p>
-          <button className="btn" type="submit">
+          <button className="btn warm" type="submit">
             Save
           </button>{" "}
           <a className="btn secondary" href="/mothers">
