@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { logSelectedOutgoing, queueCuttingsForPrint, toggleCuttingField } from "@/app/cuttings/actions";
+import { deleteCutting, logSelectedOutgoing, queueCuttingsForPrint, toggleCuttingField } from "@/app/cuttings/actions";
 import { CommerceSkuSelectionForm } from "@/components/CommerceSkuSelectionForm";
+import DeleteRecordButton from "@/components/DeleteRecordButton";
 import { OUTGOING_REASONS, type OutgoingReason } from "@/lib/cuttings-batch";
 import type { CommerceHandoffState } from "@/lib/commerce-export";
 
@@ -70,5 +71,6 @@ export default function CuttingProfileActions({ cuttingId, archived, sold, print
       </div>
       <div className="profile-secondary-actions"><button className="btn warm" type="button" disabled={Boolean(busy) || (reason === "Other" && !notes.trim())} onClick={recordOutgoing}>{busy === "outgoing" ? "Recording…" : "Confirm and remove from active inventory"}</button><button className="btn secondary" type="button" onClick={() => setOutgoingOpen(false)}>Cancel</button></div>
     </div>}
+    <div><p className="eyebrow">Danger zone</p><p className="muted">Only for a genuine mistake or duplicate entry -- blocked automatically if this cutting already has outgoing/disposition history.</p><DeleteRecordButton id={cuttingId} label="cutting" onDelete={deleteCutting} redirectTo="/cuttings" /></div>
   </section>;
 }

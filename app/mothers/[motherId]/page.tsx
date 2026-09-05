@@ -6,7 +6,8 @@ import type { HoyaSpeciesRecord } from "@/lib/hoya-library";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import type { Cutting, MotherPlant, OutgoingLogEntry } from "@/lib/types";
 import { routeRecordId } from "@/lib/route-record-id";
-import { toggleMotherField } from "../actions";
+import { deleteMother, toggleMotherField } from "../actions";
+import DeleteRecordButton from "@/components/DeleteRecordButton";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -56,5 +57,6 @@ export default async function MotherProfilePage({ params }: { params: { motherId
     <section className="card"><div className="page-header"><div><p className="eyebrow">Current propagation inventory</p><h3>Active cuttings</h3></div><Link className="btn small secondary" href={`/cuttings?q=${encodeURIComponent(mother.mother_id)}`}>Open in Cuttings workbench</Link></div>{active.length ? <div className="profile-cutting-grid">{active.map((cutting) => <article key={cutting.cutting_id}><strong><Link href={`/cuttings/${encodeURIComponent(cutting.cutting_id)}`}>{cutting.cutting_id}</Link></strong><span>Taken {dateLabel(cutting.date_taken)}</span><span>{cutting.sold ? "Marked sold" : "Active"} · {cutting.print_label ? "Label queued" : cutting.label_print_count ? "Label printed" : "No label yet"}</span><span>{cutting.commerce_acknowledged_at ? "GM Commerce received" : cutting.commerce_selected_at ? "Waiting on GM Commerce" : "Not sent to commerce"}</span></article>)}</div> : <div className="worklist-empty"><strong>No active cuttings.</strong><p>Use “Take cuttings” when this mother is ready to propagate.</p></div>}</section>
     <section className="card"><p className="eyebrow">Physical disposition history</p><h3>Outgoing descendants</h3>{outgoing.length ? <div className="profile-timeline">{outgoing.map((entry) => <article key={entry.id}><time>{dateLabel(entry.date_out)}</time><div><strong>{entry.cutting_id} · {entry.reason || "Outgoing"}</strong><p>{entry.selling_platform || "No destination recorded"}{entry.notes ? ` — ${entry.notes}` : ""}</p></div></article>)}</div> : <p className="muted">No cuttings from this mother have left active inventory.</p>}</section>
     <section className="card"><p className="eyebrow">Whole mother plant</p><h3>GM Commerce handoff</h3><p className="muted">Use this only when selling the established mother itself. Individual cuttings are sent from the Cuttings workbench.</p><CommerceSkuSelectionForm recordId={mother.mother_id} kind="mother" initialState={commerce} /></section>
+    <section className="card"><p className="eyebrow">Danger zone</p><h3>Delete this record</h3><p className="muted">Only for a genuine mistake or duplicate entry -- Mother IDs are otherwise permanent. Blocked automatically if cuttings, a cutting-ID counter, or a GM Commerce sale record already reference this mother.</p><DeleteRecordButton id={mother.mother_id} label="mother plant" onDelete={deleteMother} redirectTo="/mothers" /></section>
   </div>;
 }
