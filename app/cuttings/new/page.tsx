@@ -3,6 +3,17 @@ import { createCuttings } from "../actions";
 import type { MotherPlant } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+// `dynamic = "force-dynamic"` alone opts this route out of static/ISR
+// caching, but does not reliably guarantee every fetch made inside it
+// (including the Supabase client's) bypasses Next's Data Cache. The
+// sibling `/mothers` list page already learned this the hard way and
+// hardened itself with these same two lines -- this page mirrors that
+// fix so a mother plant added moments ago is never served from a stale
+// cached list here, the exact failure this page must never have again
+// (see docs root-cause note in app/mothers/actions.ts's revalidatePath
+// calls for the matching half of this fix).
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
 
 export default async function NewCuttingPage({ searchParams }: { searchParams: { error?: string; mother?: string } }) {
   const supabase = getSupabaseServerClient();
