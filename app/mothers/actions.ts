@@ -66,8 +66,15 @@ export async function createMother(formData: FormData) {
 
   await markSpeciesOwnedIfNeeded(naming.species);
 
+  // ROOT-CAUSE FIX (owner-reported: a newly added mother plant did not
+  // appear in the Take Cuttings selector): /cuttings/new's mother dropdown
+  // is a separate route that was never told to revalidate after a mother
+  // is created, and lacked the same cache-busting directives /mothers
+  // already has (see that page's fetchCache/revalidate exports) -- this
+  // closes both halves of the same gap.
   revalidatePath("/mothers");
   revalidatePath(`/mothers/${motherId}`);
+  revalidatePath("/cuttings/new");
   redirect("/mothers?success=" + encodeURIComponent(`Mother plant "${motherId}" added.`));
 }
 
@@ -92,6 +99,7 @@ export async function updateMother(motherId: string, formData: FormData) {
 
   revalidatePath("/mothers");
   revalidatePath(`/mothers/${motherId}`);
+  revalidatePath("/cuttings/new");
   redirect("/mothers?success=" + encodeURIComponent(`Mother plant "${motherId}" updated.`));
 }
 
