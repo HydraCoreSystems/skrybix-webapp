@@ -84,6 +84,31 @@ export async function createCuttings(formData: FormData) {
   );
 }
 
+export type DeleteRecordResult = { ok: true; message: string } | { ok: false; message: string };
+
+// OWNER-REQUESTED (2026-09-05): a manual way to remove a cutting entered
+// in error/duplicated, without going through Supabase directly. See the
+// matching comment on deleteMother in app/mothers/actions.ts -- same
+// reasoning, same fail-closed behavior. The only table referencing
+// cuttings.cutting_id is outgoing_log.cutting_id (no cascade), so a
+// cutting that has already been logged as outgoing cannot be deleted
+// until that history is removed.
+export async function deleteCutting(cuttingId: string): Promise<DeleteRecordResult> {
+  const supabase = getSupabaseServerClient();
+  const { error } = await supabase.from("cuttings").delete().eq("cutting_id", cuttingId);
+  if (error) {
+    if (error.code === "23503") {
+      return {
+        ok: false,
+        message: `Cannot delete "${cuttingId}": it already has outgoing/disposition history recorded. Remove that first, then try again.`,
+      };
+    }
+    return { ok: false, message: `Could not delete "${cuttingId}": ${error.message}` };
+  }
+  revalidatePath("/cuttings");
+  return { ok: true, message: `Cutting "${cuttingId}" deleted.` };
+}
+
 export async function toggleCuttingField(cuttingId: string, field: "sold" | "print_label", value: boolean) {
   const supabase = getSupabaseServerClient();
   const { error } = await supabase

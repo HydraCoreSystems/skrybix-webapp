@@ -648,6 +648,22 @@ tbody tr:hover {
   box-shadow: none;
 }
 
+/* Same outline shape as .btn.secondary, red-toned -- signals a genuinely
+   destructive/irreversible action (record deletion) without inventing a
+   new visual language. */
+.btn.danger {
+  background: var(--card);
+  color: var(--red);
+  border: 1.5px solid var(--red);
+  box-shadow: none;
+}
+
+.btn.danger:hover {
+  background: var(--red-bg);
+  filter: none;
+  box-shadow: none;
+}
+
 .btn.small {
   padding: 5px 11px;
   font-size: 12px;

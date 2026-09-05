@@ -95,6 +95,39 @@ export async function updateMother(motherId: string, formData: FormData) {
   redirect("/mothers?success=" + encodeURIComponent(`Mother plant "${motherId}" updated.`));
 }
 
+export type DeleteRecordResult = { ok: true; message: string } | { ok: false; message: string };
+
+// OWNER-REQUESTED (2026-09-05): a manual way to remove a mother plant
+// entered in error/duplicated, without going through Supabase directly.
+// A real DELETE, not a soft-delete/archive -- mother_id is otherwise
+// permanent by design (see docs/CURRENT_ARCHITECTURE.md), so this is
+// deliberately only for genuine mistakes, gated by an explicit owner
+// confirmation in the UI (components/DeleteRecordButton.tsx).
+//
+// No ON DELETE CASCADE exists anywhere this table is referenced from
+// (cuttings.mother_id, mother_cutting_counters.mother_id,
+// mother_commerce_facts.source_record_id -- see supabase/schema.sql) --
+// deliberately, so a delete can never silently take real cuttings or a
+// GM Commerce sale record down with it. Postgres fails the delete closed
+// (23503 foreign_key_violation) if any exist; surfaced here as a clear,
+// specific owner-facing message instead of a raw DB error.
+export async function deleteMother(motherId: string): Promise<DeleteRecordResult> {
+  const supabase = getSupabaseServerClient();
+  const { error } = await supabase.from("mother_plants").delete().eq("mother_id", motherId);
+  if (error) {
+    if (error.code === "23503") {
+      return {
+        ok: false,
+        message: `Cannot delete "${motherId}": other records still reference it (cuttings already taken from it, its cutting-ID counter, or a GM Commerce sale record). Remove those first, then try again.`,
+      };
+    }
+    return { ok: false, message: `Could not delete "${motherId}": ${error.message}` };
+  }
+  revalidatePath("/mothers");
+  revalidatePath("/cuttings/new");
+  return { ok: true, message: `Mother plant "${motherId}" deleted.` };
+}
+
 export async function toggleMotherField(motherId: string, field: "sold" | "print_label", value: boolean) {
   const supabase = getSupabaseServerClient();
   const { error } = await supabase
